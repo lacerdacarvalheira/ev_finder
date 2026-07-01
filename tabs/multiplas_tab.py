@@ -162,105 +162,149 @@ def render(cfg: dict) -> None:
     # ── Sugestões Automáticas ─────────────────────────────────────────────────
     st.markdown("### 🤖 Melhores Combinações do Dia")
 
-    col_n, col_min, col_max_odd, col_per_ev = st.columns(4)
-    n_legs      = col_n.radio("Seleções por múltipla", [2, 3], horizontal=True, key="m_legs")
-    min_ev_m    = col_min.slider("EV mínimo (%)", -20, 50, 0, key="m_min_ev")
-    max_odd_m   = col_max_odd.number_input("Odd máxima", min_value=2.0,
-                                            max_value=500.0, value=50.0, step=5.0, key="m_max_odd")
-    max_per_ev  = col_per_ev.number_input("Apostas por jogo", min_value=1,
-                                           max_value=5, value=2, step=1, key="m_per_ev",
-                                           help="Máximo de seleções por jogo no pool automático")
-
-    pool = _diverse_pool(opps, max_per_event=int(max_per_ev))
-    n_jogos = len({o.get("event_id") or o["Jogo"] for o in pool})
-    st.caption(
-        f"Pool: **{len(pool)} seleções** de **{n_jogos} jogos distintos** "
-        f"({int(max_per_ev)} melhor(es) EV+ por jogo)."
+    # Perfis predefinidos
+    _PERFIS = {
+        "🛡️ Conservador":  dict(min_prob_sel=40, min_prob_parlay=15, max_odd_sel=3.5,  min_ev=0),
+        "⚖️ Moderado":     dict(min_prob_sel=25, min_prob_parlay= 8, max_odd_sel=6.0,  min_ev=0),
+        "🚀 Agressivo":    dict(min_prob_sel=10, min_prob_parlay= 2, max_odd_sel=15.0, min_ev=0),
+        "⚙️ Personalizado": None,
+    }
+    perfil_key = st.radio(
+        "Perfil de risco",
+        list(_PERFIS.keys()),
+        index=1,
+        horizontal=True,
+        key="m_perfil",
     )
 
-    combos: list[dict] = []
-    for combo in combinations(pool, n_legs):
-        if _has_same_event(list(combo)):
-            continue
-        s = _parlay_stats(list(combo))
-        if s["ev_pct"] < min_ev_m:
-            continue
-        if s["odd_combinada"] > max_odd_m:
-            continue
-        combos.append({
-            "EV (%)":          s["ev_pct"],
-            "Odd Comb.":       s["odd_combinada"],
-            "Prob. Bater (%)": s["prob_bater"],
-            "Seleções":        " + ".join(c["Seleção"] for c in combo),
-            "Casas":           " / ".join(sorted({c["Casa"] for c in combo})),
-            "_rows":           list(combo),
-        })
+    # Linha de configuração
+    if perfil_key == "⚙️ Personalizado":
+        fc1, fc2, fc3, fc4 = st.columns(4)
+        min_prob_sel    = fc1.slider("Prob. mín. por seleção (%)", 5,  90, 25, key="m_min_prob_sel",
+                                     help="Remove longshots — ex: 40% exclui odds > 2.50")
+        min_prob_parlay = fc2.slider("Prob. mín. da múltipla (%)", 1,  60, 8,  key="m_min_prob_par",
+                                     help="Prob. mínima de toda a combinação bater")
+        max_odd_sel     = fc3.slider("Odd máxima por seleção",     1.1, 20.0, 6.0, step=0.5,
+                                     key="m_max_odd_sel",
+                                     help="Limita o risco por perna da múltipla")
+        min_ev_m        = fc4.slider("EV mínimo da múltipla (%)",  -10, 30, 0, key="m_min_ev_cust")
+    else:
+        p = _PERFIS[perfil_key]
+        min_prob_sel, min_prob_parlay, max_odd_sel, min_ev_m = (
+            p["min_prob_sel"], p["min_prob_parlay"], p["max_odd_sel"], p["min_ev"]
+        )
+        st.caption(
+            f"Prob. mín./seleção: **{min_prob_sel}%** · "
+            f"Prob. mín. da múltipla: **{min_prob_parlay}%** · "
+            f"Odd máx./seleção: **{max_odd_sel:.1f}×**"
+        )
 
-    combos.sort(key=lambda x: x["EV (%)"], reverse=True)
-    top = combos[:15]
+    c_legs, c_ord = st.columns([1, 2])
+    n_legs   = c_legs.radio("Pernas", [2, 3], horizontal=True, key="m_legs")
+    ordem_by = c_ord.radio(
+        "Ordenar por",
+        ["EV ↓ (melhor valor)", "Prob. ↓ (mais provável de bater)"],
+        horizontal=True, key="m_ordem",
+    )
 
-    if not top:
-        st.info(
-            f"Nenhuma combinação de {n_legs} seleções com EV ≥ {min_ev_m}% "
-            f"e odd ≤ {max_odd_m:.0f}×. Ajuste os filtros acima."
+    # Monta pool diverso e aplica filtros por seleção
+    raw_pool = _diverse_pool(opps, max_per_event=2)
+    pool     = [o for o in raw_pool
+                if o["Prob. Real (%)"] >= min_prob_sel
+                and o["Odd Casa"] <= max_odd_sel]
+    n_jogos  = len({o.get("event_id") or o["Jogo"] for o in pool})
+
+    if not pool:
+        st.warning(
+            f"Nenhuma seleção com prob ≥ {min_prob_sel}% e odd ≤ {max_odd_sel:.1f}× "
+            "nos dados atuais. Reduza os filtros ou troque para perfil **Agressivo**."
         )
     else:
         st.caption(
-            f"**{len(combos)}** combinações válidas — exibindo as **{len(top)} melhores**."
+            f"Pool filtrado: **{len(pool)} seleções** de **{n_jogos} jogos** "
+            f"(prob ≥ {min_prob_sel}%, odd ≤ {max_odd_sel:.1f}×)."
         )
 
-        display_df = pd.DataFrame([{k: v for k, v in c.items() if not k.startswith("_")}
-                                    for c in top])
-        styled = display_df.style.map(_ev_bg, subset=["EV (%)"])
+        combos: list[dict] = []
+        for combo in combinations(pool, n_legs):
+            if _has_same_event(list(combo)):
+                continue
+            s = _parlay_stats(list(combo))
+            if s["ev_pct"] < min_ev_m:
+                continue
+            if s["prob_bater"] < min_prob_parlay:
+                continue
+            combos.append({
+                "EV (%)":          s["ev_pct"],
+                "Odd Comb.":       s["odd_combinada"],
+                "Prob. Bater (%)": s["prob_bater"],
+                "Seleções":        " + ".join(c["Seleção"] for c in combo),
+                "Casas":           " / ".join(sorted({c["Casa"] for c in combo})),
+                "_rows":           list(combo),
+            })
 
-        st.dataframe(
-            styled,
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "EV (%)":          st.column_config.NumberColumn(format="%+.2f%%"),
-                "Odd Comb.":       st.column_config.NumberColumn(format="%.2f×"),
-                "Prob. Bater (%)": st.column_config.NumberColumn(format="%.2f%%"),
-            },
-        )
+        sort_key = "EV (%)" if "EV" in ordem_by else "Prob. Bater (%)"
+        combos.sort(key=lambda x: x[sort_key], reverse=True)
+        top = combos[:15]
 
-        st.markdown("#### Detalhes e registro")
-        for i, c in enumerate(top[:5]):
-            kelly_c  = (c["EV (%)"] / 100) / (c["Odd Comb."] - 1) * kelly_frac if c["Odd Comb."] > 1.001 else 0.0
-            apostar_c = round(bankroll * max(0.0, kelly_c), 2)
-            with st.expander(
-                f"#{i+1}  EV {c['EV (%)']:+.2f}%  |  odd {c['Odd Comb.']:.2f}×  "
-                f"|  prob {c['Prob. Bater (%)']:.2f}%  |  {c['Seleções'][:70]}"
-            ):
-                for r in c["_rows"]:
+        if not top:
+            st.info(
+                f"Nenhuma combinação com os filtros atuais "
+                f"(prob/seleção ≥ {min_prob_sel}%, prob/múltipla ≥ {min_prob_parlay}%). "
+                "Tente o perfil **Moderado** ou **Agressivo**."
+            )
+        else:
+            st.caption(f"**{len(combos)}** combinações válidas — exibindo as **{len(top)} melhores**.")
+
+            display_df = pd.DataFrame([{k: v for k, v in c.items() if not k.startswith("_")}
+                                        for c in top])
+            styled = display_df.style.map(_ev_bg, subset=["EV (%)"])
+            st.dataframe(
+                styled,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "EV (%)":          st.column_config.NumberColumn(format="%+.2f%%"),
+                    "Odd Comb.":       st.column_config.NumberColumn(format="%.2f×"),
+                    "Prob. Bater (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                },
+            )
+
+            st.markdown("#### Detalhes e registro")
+            for i, c in enumerate(top[:5]):
+                kelly_c   = (c["EV (%)"] / 100) / (c["Odd Comb."] - 1) * kelly_frac \
+                            if c["Odd Comb."] > 1.001 else 0.0
+                apostar_c = round(bankroll * max(0.0, kelly_c), 2)
+                with st.expander(
+                    f"#{i+1}  EV {c['EV (%)']:+.2f}%  |  odd {c['Odd Comb.']:.2f}×  "
+                    f"|  prob {c['Prob. Bater (%)']:.2f}%  |  {c['Seleções'][:70]}"
+                ):
+                    for r in c["_rows"]:
+                        st.markdown(
+                            f"- **{r['Seleção']}** ({r['Casa']}) — "
+                            f"odd {r['Odd Casa']:.3f} · prob {r['Prob. Real (%)']:.1f}% · "
+                            f"EV {r['EV (%)']:+.2f}%"
+                        )
                     st.markdown(
-                        f"- **{r['Seleção']}** ({r['Casa']}) — "
-                        f"odd {r['Odd Casa']:.3f} · prob {r['Prob. Real (%)']:.1f}% · "
-                        f"EV {r['EV (%)']:+.2f}%"
+                        f"**Aposta sugerida ({kelly_label}):** R$ {apostar_c:.2f}  \n"
+                        f"*Retorno esperado por R$ 100: R$ {100 * (1 + c['EV (%)'] / 100):.0f}*"
                     )
-                st.markdown(
-                    f"**Aposta sugerida ({kelly_label}):** R$ {apostar_c:.2f}  \n"
-                    f"*Retorno esperado por R$ 100: "
-                    f"R$ {100 * (1 + c['EV (%)'] / 100):.0f}*"
-                )
-                if st.button("➕ Registrar no Tracker", key=f"reg_auto_m_{i}"):
-                    rows_c = c["_rows"]
-                    kc     = max(0.0, kelly_c)
-                    st.session_state["pending_bet"] = {
-                        "jogo":      " + ".join(r["Jogo"] for r in rows_c),
-                        "mercado":   "Múltipla",
-                        "selecao":   " × ".join(r["Seleção"] for r in rows_c),
-                        "odd":       c["Odd Comb."],
-                        "stake":     round(bankroll * kc, 2),
-                        "ev_pct":    c["EV (%)"],
-                        "prob_real": c["Prob. Bater (%)"],
-                        "casa":      c["Casas"],
-                    }
-                    st.toast("Múltipla copiada para o Tracker!", icon="📋")
+                    if st.button("➕ Registrar no Tracker", key=f"reg_auto_m_{i}"):
+                        rows_c = c["_rows"]
+                        st.session_state["pending_bet"] = {
+                            "jogo":      " + ".join(r["Jogo"] for r in rows_c),
+                            "mercado":   "Múltipla",
+                            "selecao":   " × ".join(r["Seleção"] for r in rows_c),
+                            "odd":       c["Odd Comb."],
+                            "stake":     apostar_c,
+                            "ev_pct":    c["EV (%)"],
+                            "prob_real": c["Prob. Bater (%)"],
+                            "casa":      c["Casas"],
+                        }
+                        st.toast("Múltipla copiada para o Tracker!", icon="📋")
 
     st.divider()
     st.caption(
         "⚠️ Prob. de bater assume **independência** entre os jogos. "
-        "Para seleções do mesmo torneio pode haver correlação. "
-        "Múltiplas têm variância muito maior que apostas simples."
+        "Múltiplas têm variância muito maior que apostas simples — use Kelly fracionado."
     )
