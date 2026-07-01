@@ -19,7 +19,7 @@ from tabs import arb_tab, analytics_tab, compare_tab, ev_tab, sim_tab, today_tab
 from bet_tracker import calc_stats, load_bets
 from ev_calculator import find_opportunities
 from line_cache import get_cache_age, save_snapshot
-from odds_api import MARKET_OPTIONS, SOCCER_LEAGUES, OddsAPIClient, OddsAPIError
+from odds_api import BOOKMAKER_DISPLAY, MARKET_OPTIONS, SOCCER_LEAGUES, OddsAPIClient, OddsAPIError
 
 # ─── Configuração da página ───────────────────────────────────────────────────
 st.set_page_config(
@@ -115,6 +115,32 @@ with st.sidebar:
         format_func=lambda k: MARKET_OPTIONS[k],
         help="Mercados não suportados são ignorados automaticamente.",
     )
+
+    # — Casas de apostas —
+    _bk_keys     = [k for k in BOOKMAKER_DISPLAY if k != "pinnacle"]
+    _bk_defaults = config.get("selected_bookmakers",
+                               ["bet365", "superbet", "betano", "unibet_eu", "bwin"])
+    _bk_defaults = [k for k in _bk_defaults if k in _bk_keys]  # garante validade
+    selected_bookmaker_keys = st.multiselect(
+        "Casas de apostas",
+        options=_bk_keys,
+        default=_bk_defaults,
+        format_func=lambda k: BOOKMAKER_DISPLAY.get(k, k),
+        help="Deixe vazio para incluir todas as casas disponíveis.",
+        key="bookmaker_select",
+    )
+    _bk_col1, _bk_col2 = st.columns(2)
+    if _bk_col1.button("✅ Bet365 + Superbet", use_container_width=True,
+                        help="Seleciona apenas Bet365 e Superbet"):
+        save_config({**config, "selected_bookmakers": ["bet365", "superbet"]})
+        st.rerun()
+    if _bk_col2.button("🌍 Todas as casas", use_container_width=True,
+                        help="Remove filtro — mostra todas"):
+        save_config({**config, "selected_bookmakers": []})
+        st.rerun()
+    if st.button("💾 Salvar casas", width='stretch'):
+        save_config({**config, "selected_bookmakers": selected_bookmaker_keys})
+        st.toast("Casas salvas!", icon="✅")
 
     min_ev_pct = st.slider("EV mínimo (%)", min_value=1, max_value=30, value=3)
 
@@ -305,7 +331,11 @@ if _do_search:
             st.warning(f"⚠️ {err}")
 
         if all_events:
-            opps = find_opportunities(all_events, min_ev=min_ev_pct / 100)
+            opps = find_opportunities(
+                all_events,
+                min_ev=min_ev_pct / 100,
+                bookmaker_filter=selected_bookmaker_keys or None,
+            )
             st.session_state["results"]           = opps
             st.session_state["all_events"]        = all_events
             st.session_state["events_count"]      = len(all_events)
@@ -356,7 +386,8 @@ _cfg = {
     "auto_refresh":          auto_refresh,
     "has_autorefresh":       _HAS_AUTOREFRESH,
     "refresh_interval":      refresh_interval,
-    "selected_league_keys":  selected_league_keys,
+    "selected_league_keys":   selected_league_keys,
+    "selected_bookmaker_keys": selected_bookmaker_keys,
 }
 
 with tab_ev:

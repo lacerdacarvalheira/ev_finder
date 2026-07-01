@@ -199,7 +199,9 @@ _MARKET_DISPATCH = {
 
 # ─── Função principal ─────────────────────────────────────────────────────────
 
-def find_opportunities(events: list[dict], min_ev: float = 0.05) -> list[dict]:
+def find_opportunities(events: list[dict], min_ev: float = 0.05,
+                        bookmaker_filter: list[str] | None = None) -> list[dict]:
+    _filter = set(bookmaker_filter) if bookmaker_filter else None
     all_rows: list[dict] = []
 
     for event in events:
@@ -220,6 +222,8 @@ def find_opportunities(events: list[dict], min_ev: float = 0.05) -> list[dict]:
 
         for bookie in bookmakers:
             if bookie["key"] == "pinnacle":
+                continue
+            if _filter and bookie["key"] not in _filter:
                 continue
             bookie_name = _bookie_display(bookie["key"],
                                           bookie.get("title", bookie["key"]))
