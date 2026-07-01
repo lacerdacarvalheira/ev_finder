@@ -6,8 +6,103 @@ import operator
 import pandas as pd
 import streamlit as st
 
+from utils import remove_vig, format_brt, hours_until
+
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
+
+def _all_outcomes_today(events: list[dict], markets: list[str] | None = None) -> list[dict]:
+    """
+    Extrai todos os outcomes de hoje com probabilidade justa (via Pinnacle).
+    Retorna também a melhor odd disponível em outros bookmakers.
+    """
+    if markets is None:
+        markets = ["h2h"]
+
+    _MARKET_LABELS = {
+        "h2h":       "Resultado Final",
+        "draw_no_bet": "Empate Anula",
+        "btts":      "Ambas Marcam",
+        "totals":    "Total de Gols",
+        "spreads":   "Handicap",
+    }
+
+    rows = []
+    for event in events:
+        commence = event.get("commence_time", "")
+        h = hours_until(commence)
+        if h is None or h < -4 or h > 48:
+            continue
+
+        bookmakers = event.get("bookmakers", [])
+        pinnacle   = next((b for b in bookmakers if b["key"] == "pinnacle"), None)
+        if not pinnacle:
+            continue
+
+        jogo    = f"{event.get('home_team','?')} vs {event.get('away_team','?')}"
+        horario = format_brt(commence)
+        eid     = event.get("id", jogo)
+
+        for mkt in pinnacle.get("markets", []):
+            mkey = mkt["key"]
+            if mkey not in markets:
+                continue
+            pin_outcomes = mkt.get("outcomes", [])
+            if len(pin_outcomes) < 2:
+                continue
+
+            # Para totals/spreads precisamos agrupar por linha — usa só h2h por padrão
+            if mkey in ("totals", "spreads"):
+                continue  # complexo demais para o modo prob, skip
+
+            prices     = [o["price"] for o in pin_outcomes]
+            fair_probs = remove_vig(prices)
+            label      = _MARKET_LABELS.get(mkey, mkey)
+
+            for o, prob in zip(pin_outcomes, fair_probs):
+                name = o["name"]
+                # Melhor odd disponível em outros bookmakers
+                best_odd, best_bk = 1.0, "—"
+                for bk in bookmakers:
+                    if bk["key"] == "pinnacle":
+                        continue
+                    for bk_mkt in bk.get("markets", []):
+                        if bk_mkt["key"] != mkey:
+                            continue
+                        for bo in bk_mkt.get("outcomes", []):
+                            if bo["name"] == name and bo["price"] > best_odd:
+                                best_odd = bo["price"]
+                                best_bk  = bk.get("title", bk["key"])
+
+                rows.append({
+                    "Jogo":             jogo,
+                    "Horário":          horario,
+                    "Mercado":          label,
+                    "Seleção":          name,
+                    "Prob. (%)":        round(prob * 100, 1),
+                    "Melhor Odd":       round(best_odd, 3) if best_odd > 1.0 else None,
+                    "Casa":             best_bk,
+                    "event_id":         eid,
+                    "commence_time":    commence,
+                })
+
+    rows.sort(key=lambda x: (x["commence_time"], -x["Prob. (%)"]))
+    return rows
+
+
+def _parlay_stats_prob(rows: list[dict]) -> dict:
+    """Versão para modo probabilidade — usa 'Prob. (%)' em vez de 'Prob. Real (%)'."""
+    probs        = [r["Prob. (%)"] / 100 for r in rows]
+    odds         = [r["Melhor Odd"] or 1.0 for r in rows]
+    prob_combined = reduce(operator.mul, probs, 1.0)
+    odd_combined  = reduce(operator.mul, odds,  1.0)
+    ev            = prob_combined * odd_combined - 1
+    return {
+        "prob_bater":    round(prob_combined * 100, 2),
+        "odd_combinada": round(odd_combined, 3),
+        "ev_pct":        round(ev * 100, 2),
+    }
+
 
 def _parlay_stats(rows: list[dict]) -> dict:
     probs = [r["Prob. Real (%)"] / 100 for r in rows]
@@ -302,6 +397,145 @@ def render(cfg: dict) -> None:
                             "casa":      c["Casas"],
                         }
                         st.toast("Múltipla copiada para o Tracker!", icon="📋")
+
+    st.divider()
+
+    # ── Modo Probabilidade — todos os jogos de hoje ───────────────────────────
+    st.markdown("### 🎲 Combinações por Probabilidade — Todos os Jogos")
+    st.caption(
+        "Ignora EV — usa probabilidades justas do Pinnacle para **todos** os jogos do dia. "
+        "Útil para encontrar combinações com boa chance de acertar, independente do valor."
+    )
+
+    all_events = st.session_state.get("all_events", [])
+    if not all_events:
+        st.info("Faça uma busca primeiro para carregar os jogos de hoje.")
+    else:
+        # Mercados disponíveis (só os que o _all_outcomes_today suporta)
+        _MKT_OPTS = {"h2h": "Resultado Final (1X2)", "draw_no_bet": "Empate Anula", "btts": "Ambas Marcam"}
+        pb_mkts = st.multiselect(
+            "Mercados",
+            options=list(_MKT_OPTS.keys()),
+            default=["h2h"],
+            format_func=lambda k: _MKT_OPTS[k],
+            key="pb_mkts",
+        )
+        if not pb_mkts:
+            pb_mkts = ["h2h"]
+
+        all_out = _all_outcomes_today(all_events, markets=pb_mkts)
+
+        if not all_out:
+            st.warning("Nenhum jogo encontrado para hoje (próximas 48h) com dados do Pinnacle.")
+        else:
+            n_jogos_hoje = len({r["event_id"] for r in all_out})
+            st.caption(f"**{len(all_out)} outcomes** de **{n_jogos_hoje} jogos** disponíveis.")
+
+            pb_c1, pb_c2, pb_c3 = st.columns(3)
+            pb_legs     = pb_c1.radio("Pernas", [2, 3], horizontal=True, key="pb_legs")
+            pb_min_sel  = pb_c2.slider("Prob. mín. por seleção (%)", 5, 90, 40, key="pb_min_sel",
+                                        help="Ex: 40% = apenas favoritos com >40% de chance")
+            pb_min_tot  = pb_c3.slider("Prob. mín. da múltipla (%)", 1, 60, 15, key="pb_min_tot")
+
+            # Pool filtrado
+            pb_pool = [r for r in all_out if r["Prob. (%)"] >= pb_min_sel]
+            n_pool_jogos = len({r["event_id"] for r in pb_pool})
+
+            if not pb_pool:
+                st.info(f"Nenhuma seleção com prob ≥ {pb_min_sel}%. Reduza o filtro.")
+            else:
+                st.caption(
+                    f"Pool: **{len(pb_pool)} seleções** de **{n_pool_jogos} jogos** "
+                    f"(prob ≥ {pb_min_sel}%)."
+                )
+
+                # Gera combinações
+                pb_combos = []
+                for combo in combinations(pb_pool, pb_legs):
+                    ids = [r["event_id"] for r in combo]
+                    if len(ids) != len(set(ids)):
+                        continue
+                    s = _parlay_stats_prob(list(combo))
+                    if s["prob_bater"] < pb_min_tot:
+                        continue
+                    pb_combos.append({
+                        "Prob. Bater (%)": s["prob_bater"],
+                        "Odd Comb.":       s["odd_combinada"],
+                        "EV (%)":          s["ev_pct"],
+                        "Seleções":        " + ".join(r["Seleção"] for r in combo),
+                        "Horários":        " | ".join(r["Horário"] for r in combo),
+                        "_rows":           list(combo),
+                    })
+
+                pb_combos.sort(key=lambda x: x["Prob. Bater (%)"], reverse=True)
+                top_pb = pb_combos[:20]
+
+                if not top_pb:
+                    st.info(
+                        f"Nenhuma combinação de {pb_legs} seleções com prob ≥ {pb_min_tot}%. "
+                        "Reduza os filtros."
+                    )
+                else:
+                    st.caption(
+                        f"**{len(pb_combos)}** combinações válidas — "
+                        f"exibindo as **{len(top_pb)} mais prováveis**."
+                    )
+
+                    def _prob_bg(val: float) -> str:
+                        if val >= 60: return "background-color:#155724;color:white;font-weight:bold"
+                        if val >= 40: return "background-color:#1e7e34;color:white;font-weight:bold"
+                        if val >= 25: return "background-color:#28a745;color:white"
+                        if val >= 15: return "background-color:#c3e6cb;color:#155724"
+                        return ""
+
+                    pb_df = pd.DataFrame([
+                        {k: v for k, v in c.items() if not k.startswith("_")}
+                        for c in top_pb
+                    ])
+                    pb_styled = pb_df.style.map(_prob_bg, subset=["Prob. Bater (%)"])
+
+                    st.dataframe(
+                        pb_styled,
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={
+                            "Prob. Bater (%)": st.column_config.NumberColumn(format="%.1f%%"),
+                            "Odd Comb.":       st.column_config.NumberColumn(format="%.2f×"),
+                            "EV (%)":          st.column_config.NumberColumn(format="%+.1f%%"),
+                        },
+                    )
+
+                    st.markdown("#### Detalhes")
+                    for i, c in enumerate(top_pb[:5]):
+                        ev_icon = "✅" if c["EV (%)"] >= 0 else "⚠️"
+                        with st.expander(
+                            f"#{i+1}  {c['Prob. Bater (%)']:.1f}% de bater  |  "
+                            f"odd {c['Odd Comb.']:.2f}×  |  {c['Seleções'][:70]}"
+                        ):
+                            for r in c["_rows"]:
+                                best = f"odd {r['Melhor Odd']:.2f} @ {r['Casa']}" \
+                                       if r["Melhor Odd"] else "sem odd disponível"
+                                st.markdown(
+                                    f"- **{r['Seleção']}** ({r['Jogo']}, {r['Horário']})  \n"
+                                    f"  Prob. Pinnacle: **{r['Prob. (%)']}%** · {best}"
+                                )
+                            st.markdown(
+                                f"{ev_icon} EV estimado: **{c['EV (%)']:+.1f}%** "
+                                f"(com as melhores odds disponíveis)"
+                            )
+                            if st.button("➕ Registrar no Tracker", key=f"reg_pb_{i}"):
+                                rows_c = c["_rows"]
+                                st.session_state["pending_bet"] = {
+                                    "jogo":      " + ".join(r["Jogo"] for r in rows_c),
+                                    "mercado":   "Múltipla",
+                                    "selecao":   " × ".join(r["Seleção"] for r in rows_c),
+                                    "odd":       c["Odd Comb."],
+                                    "stake":     0.0,
+                                    "ev_pct":    c["EV (%)"],
+                                    "prob_real": c["Prob. Bater (%)"],
+                                    "casa":      " / ".join(sorted({r["Casa"] for r in rows_c if r["Casa"] != "—"})),
+                                }
+                                st.toast("Múltipla copiada para o Tracker!", icon="📋")
 
     st.divider()
     st.caption(
