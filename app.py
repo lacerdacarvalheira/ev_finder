@@ -63,7 +63,7 @@ with st.sidebar:
         type="password",
         placeholder="Cole sua chave ou defina ODDS_API_KEY no ambiente...",
     )
-    if st.button("💾 Salvar chave", use_container_width=True):
+    if st.button("💾 Salvar chave", width='stretch'):
         save_config({**config, "api_key": api_key})
         st.toast("Chave salva!", icon="✅")
 
@@ -77,7 +77,7 @@ with st.sidebar:
         value=float(config.get("bankroll", 1000)),
         step=100.0,
     )
-    if st.button("💾 Salvar bankroll", use_container_width=True):
+    if st.button("💾 Salvar bankroll", width='stretch'):
         save_config({**config, "bankroll": bankroll})
         st.toast(f"Bankroll de R$ {bankroll:,.0f} salvo!", icon="✅")
 
@@ -124,7 +124,7 @@ with st.sidebar:
     search_btn = st.button(
         "🔍 Buscar Oportunidades",
         type="primary",
-        use_container_width=True,
+        width='stretch',
         disabled=not api_key,
     )
 
@@ -195,7 +195,7 @@ with st.sidebar:
         placeholder="-100123456789",
         help="ID do seu chat ou grupo. Envie /start para o bot e acesse getUpdates.",
     )
-    if st.button("💾 Salvar Telegram", use_container_width=True):
+    if st.button("💾 Salvar Telegram", width='stretch'):
         save_config({**config, "telegram_token": tg_token, "telegram_chat_id": tg_chat_id})
         st.toast("Configuração Telegram salva!", icon="📲")
 

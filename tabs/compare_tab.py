@@ -82,7 +82,7 @@ def render(cfg: dict) -> None:
     styled_comp = comp_df.style.apply(highlight_best, axis=1).format("{:.3f}", na_rep="—")
 
     st.subheader(f"📊 {selected_game} — {MARKET_OPTIONS.get(market_key, market_key)}")
-    st.dataframe(styled_comp, use_container_width=True)
+    st.dataframe(styled_comp, width='stretch')
     st.caption(
         "🟦 **Azul** = Odd justa Pinnacle (sem vig). "
         "🟩 **Verde** = Melhor odd disponível. "
@@ -136,7 +136,7 @@ def render(cfg: dict) -> None:
                 margin=dict(l=0, r=0, t=30, b=0),
                 hovermode="x unified",
             )
-            st.plotly_chart(fig_lm, use_container_width=True)
+            st.plotly_chart(fig_lm, width='stretch')
             st.caption(f"Fonte: Pinnacle | {len(snapshots)} pontos de dados coletados")
         else:
             st.caption("Sem dados da Pinnacle para este mercado no histórico.")

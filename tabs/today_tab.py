@@ -175,7 +175,7 @@ def render(cfg: dict) -> None:
                         return ""
                     st.dataframe(
                         pd.DataFrame(table_rows).style.map(_color_ev_cell, subset=["EV"]),
-                        use_container_width=True, hide_index=True,
+                        width='stretch', hide_index=True,
                         column_config={"Melhor Odd": st.column_config.NumberColumn(format="%.3f")},
                     )
 
@@ -212,7 +212,7 @@ def render(cfg: dict) -> None:
                                 return "background-color:#c3e6cb;color:#155724"
                             st.dataframe(
                                 df_m.style.map(_ev_bg, subset=["EV (%)"]),
-                                use_container_width=True, hide_index=True,
+                                width='stretch', hide_index=True,
                                 column_config={
                                     "Odd":        st.column_config.NumberColumn(format="%.3f"),
                                     "Odd Justa":  st.column_config.NumberColumn(format="%.3f"),
@@ -357,7 +357,7 @@ def render(cfg: dict) -> None:
                                 if stat_rows:
                                     st.dataframe(
                                         pd.DataFrame(stat_rows),
-                                        use_container_width=True,
+                                        width='stretch',
                                         hide_index=True,
                                     )
 

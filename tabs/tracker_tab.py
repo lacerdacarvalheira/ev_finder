@@ -138,7 +138,7 @@ def render(cfg: dict) -> None:
             height=350,
             margin=dict(l=0, r=0, t=10, b=0),
         )
-        st.plotly_chart(fig_pnl, use_container_width=True)
+        st.plotly_chart(fig_pnl, width='stretch')
 
     # ROI por segmento
     if resolved_bets:
@@ -159,7 +159,7 @@ def render(cfg: dict) -> None:
 
             st.dataframe(
                 df_seg.style.map(_roi_bg, subset=["ROI (%)"]),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 column_config={
                     "ROI (%)":       st.column_config.NumberColumn(format="%.1f%%"),
@@ -189,5 +189,5 @@ def render(cfg: dict) -> None:
         data=csv_bytes,
         file_name="apostas.csv",
         mime="text/csv",
-        use_container_width=True,
+        width='stretch',
     )

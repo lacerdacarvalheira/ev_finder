@@ -88,7 +88,7 @@ def render(cfg: dict) -> None:
             margin=dict(l=0, r=0, t=40, b=0),
             hovermode="x unified",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
         final_vals = paths[:, -1]
         sr1, sr2, sr3, sr4 = st.columns(4)

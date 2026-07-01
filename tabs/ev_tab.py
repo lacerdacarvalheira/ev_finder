@@ -44,7 +44,7 @@ def render(cfg: dict) -> None:
             f"Melhor EV encontrado: **+{_alert_b:.1f}%**"
         )
         if sound_alerts and st.session_state.pop("_alert_play", False):
-            st.components.v1.html("""
+            st.html("""
             <script>
             try {
               const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -57,7 +57,7 @@ def render(cfg: dict) -> None:
               });
             } catch(e) {}
             </script>
-            """, height=0)
+            """)
 
     all_opps     = st.session_state["results"]
     events_count = st.session_state.get("events_count", 0)
@@ -142,7 +142,7 @@ def render(cfg: dict) -> None:
 
     st.dataframe(
         styled,
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
         column_config={
             "EV (%)":              st.column_config.NumberColumn(format="%.2f%%"),
