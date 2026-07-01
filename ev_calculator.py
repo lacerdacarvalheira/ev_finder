@@ -8,7 +8,8 @@ Mercados suportados:
   team_totals, alternate_totals, alternate_spreads
 """
 from collections import defaultdict
-from utils import BRT, bookie_display, format_brt, remove_vig
+from loguru import logger
+from utils import BRT, bookie_display, derive_two_way_from_3way, format_brt, remove_vig
 
 _MAX_ODD_RATIO = 2.0   # Odd > 2× a odd justa = provável erro de dados
 
@@ -61,7 +62,11 @@ def _process_h2h(pin, bk, meta, bookie, min_ev,
     pin_map = {o["name"]: o["price"] for o in pin}
     if len(pin_map) < 2:
         return []
-    fair = dict(zip(pin_map.keys(), remove_vig(list(pin_map.values()))))
+    fair_list = remove_vig(list(pin_map.values()))
+    if fair_list is None:
+        logger.warning(f"[ev_calculator] devig falhou em h2h: {pin_map}")
+        return []
+    fair = dict(zip(pin_map.keys(), fair_list))
     rows = []
     for o in bk:
         name, price = o["name"], o["price"]
@@ -98,8 +103,12 @@ def _process_totals(pin, bk, meta, bookie, min_ev,
         if not bk_outcomes:
             continue
 
-        pin_map = {o["name"]: o["price"] for o in pin_outcomes}
-        fair    = dict(zip(pin_map.keys(), remove_vig(list(pin_map.values()))))
+        pin_map   = {o["name"]: o["price"] for o in pin_outcomes}
+        fair_list = remove_vig(list(pin_map.values()))
+        if fair_list is None:
+            logger.warning(f"[ev_calculator] devig falhou em totals {point}: {pin_map}")
+            continue
+        fair = dict(zip(pin_map.keys(), fair_list))
 
         for o in bk_outcomes:
             name, price = o["name"], o["price"]
@@ -145,8 +154,12 @@ def _process_spreads(pin, bk, meta, bookie, min_ev,
         if not bk_entries:
             continue
 
-        names = list(pin_entries.keys())
-        fair  = dict(zip(names, remove_vig([pin_entries[n]["price"] for n in names])))
+        names     = list(pin_entries.keys())
+        fair_list = remove_vig([pin_entries[n]["price"] for n in names])
+        if fair_list is None:
+            logger.warning(f"[ev_calculator] devig falhou em spreads {line_key}")
+            continue
+        fair = dict(zip(names, fair_list))
 
         for name, entry in bk_entries.items():
             price = entry["price"]
@@ -162,16 +175,31 @@ def _process_spreads(pin, bk, meta, bookie, min_ev,
     return rows
 
 
-def _process_twoway(pin, bk, meta, bookie, min_ev, market_label):
-    if len(pin) < 2:
-        return []
-    pin_map = {o["name"]: o["price"] for o in pin}
-    fair    = dict(zip(pin_map.keys(), remove_vig(list(pin_map.values()))))
+def _process_twoway(pin, bk, meta, bookie, min_ev, market_label,
+                    derived: dict | None = None):
+    """
+    Mercados 2-way (btts, DNB, dupla chance).
+    `derived`: mapa {nome_outcome: prob} vindo do 3-way devigado — quando
+    fornecido tem prioridade sobre o devig direto do mercado (mais líquido).
+    """
+    fair: dict = {}
+    if pin and len(pin) >= 2:
+        pin_map   = {o["name"]: o["price"] for o in pin}
+        fair_list = remove_vig(list(pin_map.values()))
+        if fair_list is None:
+            logger.warning(f"[ev_calculator] devig falhou em {market_label}: {pin_map}")
+        else:
+            fair = dict(zip(pin_map.keys(), fair_list))
+
     rows = []
     for o in bk:
         name, price = o["name"], o["price"]
-        prob = fair.get(name)
+        prob = None
+        if derived:
+            prob = derived.get(name)
         if prob is None:
+            prob = fair.get(name)
+        if prob is None or prob <= 0:
             continue
         ev = (prob * price) - 1
         if ev >= min_ev:
@@ -212,6 +240,19 @@ def find_opportunities(events: list[dict], min_ev: float = 0.05,
 
         pin_markets = {m["key"]: m["outcomes"] for m in pinnacle.get("markets", [])}
 
+        # Probs derivadas do 3-way devigado — referência mais líquida para DNB/DC
+        home = event.get("home_team", "")
+        away = event.get("away_team", "")
+        derived_maps: dict = {}
+        h2h_pin = pin_markets.get("h2h", [])
+        if len(h2h_pin) >= 3 and home and away:
+            fair3_list = remove_vig([o["price"] for o in h2h_pin])
+            if fair3_list is not None:
+                fair3 = dict(zip([o["name"] for o in h2h_pin], fair3_list))
+                two_way = derive_two_way_from_3way(fair3, home, away)
+                derived_maps["draw_no_bet"]  = two_way["dnb"]
+                derived_maps["doubleChance"] = two_way["dc"]
+
         meta = {
             "jogo":              f"{event.get('home_team','?')} vs {event.get('away_team','?')}",
             "hora":              _format_time(event.get("commence_time", "")),
@@ -233,7 +274,22 @@ def find_opportunities(events: list[dict], min_ev: float = 0.05,
                 pin_outcomes = pin_markets.get(mkey)
                 handler      = _MARKET_DISPATCH.get(mkey)
 
-                if pin_outcomes is None or handler is None:
+                if handler is None:
+                    continue
+
+                # DNB/DC: prob derivada do 3-way permite avaliar mesmo
+                # sem a Pinnacle oferecer o mercado diretamente
+                if mkey in ("draw_no_bet", "doubleChance") and mkey in derived_maps:
+                    rows = _process_twoway(
+                        pin_outcomes or [], market["outcomes"], meta, bookie_name,
+                        min_ev,
+                        "Empate Anula (DNB)" if mkey == "draw_no_bet" else "Dupla Chance",
+                        derived=derived_maps[mkey],
+                    )
+                    all_rows.extend(rows)
+                    continue
+
+                if pin_outcomes is None:
                     continue
 
                 rows = handler(pin_outcomes, market["outcomes"], meta, bookie_name, min_ev)

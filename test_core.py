@@ -72,9 +72,9 @@ def test_remove_vig():
     safe = remove_vig([0.0, 2.0])
     _assert("remove_vig protege contra divisão por zero", len(safe) == 2)
 
-    # Proteção contra lista de 1 elemento
+    # Lista de 1 elemento deve falhar alto (None), não passar silenciosa
     single = remove_vig([1.5])
-    _assert("remove_vig retorna lista de 1 intacta", single == [1.5])
+    _assert("remove_vig com 1 item retorna None", single is None)
 
 
 # ─── EV formula ────────────────────────────────────────────────────────────────
@@ -442,6 +442,125 @@ def test_ev_calibration():
     _assert_close("ROI final correto com 100% acerto", roi_curve[-1], 100.0, 1e-9)
 
 
+def test_remove_vig_power():
+    from utils import remove_vig_power, remove_vig_multiplicative
+
+    # Soma 1.0 em 2-way e 3-way
+    for prices in ([1.30, 3.80], [2.1, 3.5, 3.8], [1.9, 1.9]):
+        probs = remove_vig_power(prices)
+        _assert_close(f"power soma 1.0 para {prices}", sum(probs), 1.0, 1e-9)
+
+    # Power dá prob MAIOR ao favorito que o multiplicativo (corrige o bias)
+    mult  = remove_vig_multiplicative([1.30, 3.80])
+    power = remove_vig_power([1.30, 3.80])
+    _assert("power favorito > multiplicativo favorito", power[0] > mult[0])
+    _assert("power azarao < multiplicativo azarao",     power[1] < mult[1])
+
+    # 1 item retorna None em ambos os métodos
+    _assert("power com 1 item retorna None",          remove_vig_power([1.85]) is None)
+    _assert("multiplicativo com 1 item retorna None", remove_vig_multiplicative([1.85]) is None)
+
+    # Dispatch por método
+    from utils import remove_vig
+    via_power = remove_vig([1.30, 3.80], method="power")
+    via_mult  = remove_vig([1.30, 3.80], method="multiplicative")
+    _assert_close("dispatch power igual funcao direta", via_power[0], power[0], 1e-12)
+    _assert_close("dispatch mult igual funcao direta",  via_mult[0],  mult[0],  1e-12)
+
+
+def test_derive_two_way():
+    from utils import derive_two_way_from_3way, remove_vig
+
+    fair3_list = remove_vig([1.65, 3.90, 5.50])  # home, draw, away
+    fair3 = {"England": fair3_list[0], "Draw": fair3_list[1], "Slovakia": fair3_list[2]}
+    d = derive_two_way_from_3way(fair3, "England", "Slovakia")
+
+    # DNB soma 1
+    _assert_close("DNB soma 1.0", d["dnb"]["England"] + d["dnb"]["Slovakia"], 1.0, 1e-9)
+    # DNB favorito > prob 3-way (condicionado a nao-empate)
+    _assert("DNB favorito > prob 3-way", d["dnb"]["England"] > fair3["England"])
+
+    # DC coerente: 1X + prob(away) = 1 ; X2 + prob(home) = 1 ; 12 + prob(draw) = 1
+    _assert_close("DC 1X = p_home + p_draw", d["dc"]["1X"], fair3["England"] + fair3["Draw"], 1e-9)
+    _assert_close("DC X2 = p_draw + p_away", d["dc"]["X2"], fair3["Draw"] + fair3["Slovakia"], 1e-9)
+    _assert_close("DC 12 = p_home + p_away", d["dc"]["12"], fair3["England"] + fair3["Slovakia"], 1e-9)
+    _assert_close("DC 1X + p_away = 1",      d["dc"]["1X"] + fair3["Slovakia"], 1.0, 1e-9)
+
+    # Aliases apontam para a mesma prob
+    _assert_close("alias England/Draw == 1X", d["dc"]["England/Draw"], d["dc"]["1X"], 1e-12)
+
+
+def test_favoritos_filter():
+    from game_analyst import favoritos_do_dia
+
+    def _event(best_home_odd: float):
+        return {
+            "id": "ev1",
+            "home_team": "England", "away_team": "Slovakia",
+            "commence_time": "2099-07-10T18:00:00Z",
+            "bookmakers": [
+                {"key": "pinnacle", "title": "Pinnacle", "markets": [
+                    {"key": "h2h", "outcomes": [
+                        {"name": "England",  "price": 1.30},
+                        {"name": "Draw",     "price": 5.50},
+                        {"name": "Slovakia", "price": 11.00},
+                    ]}]},
+                {"key": "betsson", "title": "Betsson", "markets": [
+                    {"key": "h2h", "outcomes": [
+                        {"name": "England",  "price": best_home_odd},
+                        {"name": "Draw",     "price": 5.40},
+                        {"name": "Slovakia", "price": 10.00},
+                    ]}]},
+            ],
+        }
+
+    _W = 10**9  # janela enorme — evento de teste é em 2099
+
+    # Odd 1.20 << odd justa (~1.32 devigada) → EV < 0 → excluída com ev_floor=0
+    favs_low = favoritos_do_dia([_event(1.20)], min_prob=0.65, ev_floor=0.0,
+                                 hours_window=_W)
+    h2h_low  = [f for f in favs_low if f["Mercado"] == "Resultado Final"]
+    _assert("favorito com odd abaixo da justa é excluído", len(h2h_low) == 0)
+
+    # Odd 1.45 > odd justa → EV > 0 → aparece
+    favs_hi = favoritos_do_dia([_event(1.45)], min_prob=0.65, ev_floor=0.0,
+                                hours_window=_W)
+    h2h_hi  = [f for f in favs_hi if f["Mercado"] == "Resultado Final"
+               and f["Seleção"] == "England"]
+    _assert("favorito com odd acima da justa aparece", len(h2h_hi) == 1)
+    if h2h_hi:
+        _assert("EV do favorito listado >= 0", h2h_hi[0]["EV (%)"] >= 0)
+        _assert("prob justa >= piso",          h2h_hi[0]["Prob. justa (%)"] >= 65.0)
+
+
+def test_pior_sequencia():
+    import random
+    from game_analyst import pior_sequencia_esperada
+
+    k = pior_sequencia_esperada(0.7, 100)
+    _assert(f"pior sequencia p=0.7 n=100 → K=3 ou 4 (obtido {k})", k in (3, 4))
+
+    # Valida contra simulação: sequência máxima média deve ficar perto de K
+    rng = random.Random(42)
+    max_streaks = []
+    for _ in range(2000):
+        streak = worst = 0
+        for _ in range(100):
+            if rng.random() < 0.7:
+                streak = 0
+            else:
+                streak += 1
+                worst = max(worst, streak)
+        max_streaks.append(worst)
+    media_sim = sum(max_streaks) / len(max_streaks)
+    _assert(f"formula proxima da simulacao (formula={k}, sim={media_sim:.1f})",
+            abs(media_sim - k) <= 1.5)
+
+    # Sanidade: prob maior → sequência menor
+    _assert("p=0.9 tem sequencia menor que p=0.5",
+            pior_sequencia_esperada(0.9, 100) < pior_sequencia_esperada(0.5, 100))
+
+
 # ─── Runner ────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -459,6 +578,10 @@ if __name__ == "__main__":
         test_kelly_portfolio,
         test_spreads_grouping,
         test_ev_calibration,
+        test_remove_vig_power,
+        test_derive_two_way,
+        test_favoritos_filter,
+        test_pior_sequencia,
     ]
 
     for fn in tests:

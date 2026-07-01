@@ -4,7 +4,7 @@ import time
 import pandas as pd
 import streamlit as st
 
-from utils import hours_until, urgency_badge
+from utils import GLOSSARY, hours_until, urgency_badge
 
 
 def render(cfg: dict) -> None:
@@ -179,9 +179,12 @@ def render(cfg: dict) -> None:
         width='stretch',
         hide_index=True,
         column_config={
-            "EV (%)":              st.column_config.NumberColumn(format="%.2f%%"),
-            "Prob. Real (%)":      st.column_config.NumberColumn(format="%.1f%%"),
-            "Kelly (%)":           st.column_config.NumberColumn(format="%.2f%%"),
+            "EV (%)":              st.column_config.NumberColumn(
+                format="%.2f%%", help=GLOSSARY["EV (Valor Esperado)"]),
+            "Prob. Real (%)":      st.column_config.NumberColumn(
+                format="%.1f%%", help=GLOSSARY["Probabilidade justa"]),
+            "Kelly (%)":           st.column_config.NumberColumn(
+                format="%.2f%%", help=GLOSSARY["Kelly"]),
             "Apostar (R$)":        st.column_config.NumberColumn(format="R$ %.2f"),
             "Odd Casa":            st.column_config.NumberColumn(format="%.3f"),
             "Odd Pinnacle (fair)": st.column_config.NumberColumn(format="%.3f"),

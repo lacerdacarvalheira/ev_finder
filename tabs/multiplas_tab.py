@@ -6,88 +6,11 @@ import operator
 import pandas as pd
 import streamlit as st
 
-from utils import remove_vig, format_brt, hours_until
+from game_analyst import all_outcomes_today as _all_outcomes_today
+from utils import help_icon
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
-
-def _all_outcomes_today(events: list[dict], markets: list[str] | None = None) -> list[dict]:
-    """
-    Extrai todos os outcomes de hoje com probabilidade justa (via Pinnacle).
-    Retorna também a melhor odd disponível em outros bookmakers.
-    """
-    if markets is None:
-        markets = ["h2h"]
-
-    _MARKET_LABELS = {
-        "h2h":       "Resultado Final",
-        "draw_no_bet": "Empate Anula",
-        "btts":      "Ambas Marcam",
-        "totals":    "Total de Gols",
-        "spreads":   "Handicap",
-    }
-
-    rows = []
-    for event in events:
-        commence = event.get("commence_time", "")
-        h = hours_until(commence)
-        if h is None or h < -4 or h > 48:
-            continue
-
-        bookmakers = event.get("bookmakers", [])
-        pinnacle   = next((b for b in bookmakers if b["key"] == "pinnacle"), None)
-        if not pinnacle:
-            continue
-
-        jogo    = f"{event.get('home_team','?')} vs {event.get('away_team','?')}"
-        horario = format_brt(commence)
-        eid     = event.get("id", jogo)
-
-        for mkt in pinnacle.get("markets", []):
-            mkey = mkt["key"]
-            if mkey not in markets:
-                continue
-            pin_outcomes = mkt.get("outcomes", [])
-            if len(pin_outcomes) < 2:
-                continue
-
-            # Para totals/spreads precisamos agrupar por linha — usa só h2h por padrão
-            if mkey in ("totals", "spreads"):
-                continue  # complexo demais para o modo prob, skip
-
-            prices     = [o["price"] for o in pin_outcomes]
-            fair_probs = remove_vig(prices)
-            label      = _MARKET_LABELS.get(mkey, mkey)
-
-            for o, prob in zip(pin_outcomes, fair_probs):
-                name = o["name"]
-                # Melhor odd disponível em outros bookmakers
-                best_odd, best_bk = 1.0, "—"
-                for bk in bookmakers:
-                    if bk["key"] == "pinnacle":
-                        continue
-                    for bk_mkt in bk.get("markets", []):
-                        if bk_mkt["key"] != mkey:
-                            continue
-                        for bo in bk_mkt.get("outcomes", []):
-                            if bo["name"] == name and bo["price"] > best_odd:
-                                best_odd = bo["price"]
-                                best_bk  = bk.get("title", bk["key"])
-
-                rows.append({
-                    "Jogo":             jogo,
-                    "Horário":          horario,
-                    "Mercado":          label,
-                    "Seleção":          name,
-                    "Prob. (%)":        round(prob * 100, 1),
-                    "Melhor Odd":       round(best_odd, 3) if best_odd > 1.0 else None,
-                    "Casa":             best_bk,
-                    "event_id":         eid,
-                    "commence_time":    commence,
-                })
-
-    rows.sort(key=lambda x: (x["commence_time"], -x["Prob. (%)"]))
-    return rows
 
 
 def _parlay_stats_prob(rows: list[dict]) -> dict:
@@ -538,7 +461,10 @@ def render(cfg: dict) -> None:
                                 st.toast("Múltipla copiada para o Tracker!", icon="📋")
 
     st.divider()
-    st.caption(
+    _ind_col, _ind_help = st.columns([11, 1])
+    _ind_col.caption(
         "⚠️ Prob. de bater assume **independência** entre os jogos. "
         "Múltiplas têm variância muito maior que apostas simples — use Kelly fracionado."
     )
+    with _ind_help:
+        help_icon("EV (Valor Esperado)", key="mult_indep_help")

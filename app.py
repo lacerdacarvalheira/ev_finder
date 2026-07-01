@@ -15,7 +15,7 @@ except ImportError:
     _HAS_AUTOREFRESH = False
     def st_autorefresh(*a, **kw): return 0  # noqa: E731
 
-from tabs import arb_tab, analytics_tab, compare_tab, ev_tab, multiplas_tab, sim_tab, today_tab, tracker_tab, watchlist_tab
+from tabs import arb_tab, analytics_tab, compare_tab, ev_tab, favoritos_tab, multiplas_tab, sim_tab, today_tab, tracker_tab, watchlist_tab
 from bet_tracker import calc_stats, load_bets
 from ev_calculator import find_opportunities
 from line_cache import get_cache_age, save_snapshot
@@ -141,6 +141,21 @@ with st.sidebar:
     if st.button("💾 Salvar casas", width='stretch'):
         save_config({**config, "selected_bookmakers": selected_bookmaker_keys})
         st.toast("Casas salvas!", icon="✅")
+
+    # — Método de devig —
+    _dv_col, _dv_h1, _dv_h2 = st.columns([8, 1, 1])
+    devig_label = _dv_col.selectbox(
+        "Método de devig",
+        ["Power (recomendado)", "Multiplicativo (legado)"],
+        index=0,
+        key="devig_method_select",
+    )
+    from utils import help_icon as _help_icon, set_devig_method as _set_devig
+    with _dv_h1:
+        _help_icon("Devig", key="sb_devig_help")
+    with _dv_h2:
+        _help_icon("Vig (margem)", key="sb_vig_help")
+    _set_devig("power" if "Power" in devig_label else "multiplicative")
 
     min_ev_pct = st.slider("EV mínimo (%)", min_value=1, max_value=30, value=3)
 
@@ -362,9 +377,10 @@ if _do_search:
         st.rerun()
 
 # ─── Abas ─────────────────────────────────────────────────────────────────────
-tab_ev, tab_today, tab_arb, tab_compare, tab_multiplas, tab_tracker, tab_sim, tab_analytics, tab_watchlist = st.tabs([
+tab_ev, tab_today, tab_favoritos, tab_arb, tab_compare, tab_multiplas, tab_tracker, tab_sim, tab_analytics, tab_watchlist = st.tabs([
     "🔍 Buscar EV+",
     "📅 Jogos de Hoje",
+    "⭐ Favoritos",
     "⚡ Arbitragem",
     "📊 Comparativo de Odds",
     "🎰 Múltiplas",
@@ -402,6 +418,9 @@ with tab_today:
 
 with tab_compare:
     compare_tab.render(_cfg)
+
+with tab_favoritos:
+    favoritos_tab.render(_cfg)
 
 with tab_multiplas:
     multiplas_tab.render(_cfg)

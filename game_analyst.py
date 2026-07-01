@@ -61,7 +61,7 @@ def analyze_game(event: dict, all_opportunities: list[dict],
     if h2h_outcomes:
         names  = [o["name"] for o in h2h_outcomes]
         prices = [o["price"] for o in h2h_outcomes]
-        fair_p = remove_vig(prices)
+        fair_p = remove_vig(prices) or []
         for name, prob in zip(names, fair_p):
             probs[name] = {
                 "prob":     round(prob * 100, 1),
@@ -91,11 +91,9 @@ def analyze_game(event: dict, all_opportunities: list[dict],
     pin_totals = [o for o in pin_markets.get("totals", []) if o.get("point") == 2.5]
     if pin_totals:
         pin_tot_map = {o["name"]: o["price"] for o in pin_totals}
-        if len(pin_tot_map) >= 2:
-            fair_tot = dict(zip(
-                pin_tot_map.keys(),
-                remove_vig(list(pin_tot_map.values()))
-            ))
+        _fair_tot_list = remove_vig(list(pin_tot_map.values())) if len(pin_tot_map) >= 2 else None
+        if _fair_tot_list is not None:
+            fair_tot = dict(zip(pin_tot_map.keys(), _fair_tot_list))
             for bk in bookmakers:
                 if bk["key"] == "pinnacle":
                     continue
@@ -479,6 +477,8 @@ def recommend_bets(event: dict, analysis: dict) -> list[dict]:
             names  = [o["name"] for o in outcomes]
             prices = [o["price"] for o in outcomes]
             fair_p = remove_vig(prices)
+            if fair_p is None:
+                continue
             over_p = next((p for n, p in zip(names, fair_p) if "Over" in n), None)
             if over_p:
                 xg_data.append((pt, over_p))
@@ -502,7 +502,8 @@ def recommend_bets(event: dict, analysis: dict) -> list[dict]:
             pt15, outs15 = over15_data
             names15  = [o["name"] for o in outs15]
             prices15 = [o["price"] for o in outs15]
-            fair15   = dict(zip(names15, remove_vig(prices15)))
+            _fair15_list = remove_vig(prices15)
+            fair15   = dict(zip(names15, _fair15_list)) if _fair15_list else {}
             over15_p = fair15.get("Over", 0) * 100
             odd15, bk15 = _best_odd_for("totals", "Over", 1.5)
             if odd15 > 1 and over15_p >= 75:
@@ -523,7 +524,8 @@ def recommend_bets(event: dict, analysis: dict) -> list[dict]:
             pt25, outs25 = over25_data
             names25  = [o["name"] for o in outs25]
             prices25 = [o["price"] for o in outs25]
-            fair25   = dict(zip(names25, remove_vig(prices25)))
+            _fair25_list = remove_vig(prices25)
+            fair25   = dict(zip(names25, _fair25_list)) if _fair25_list else {}
             over25_p = fair25.get("Over", 0) * 100
             under25_p = fair25.get("Under", 0) * 100
             odd25, bk25 = _best_odd_for("totals", "Over", 2.5)
@@ -574,7 +576,8 @@ def recommend_bets(event: dict, analysis: dict) -> list[dict]:
                         continue  # favorito deve ter handicap negativo
                     names_p  = list(entries.keys())
                     prices_p = [entries[n]["price"] for n in names_p]
-                    fair_sp  = dict(zip(names_p, remove_vig(prices_p)))
+                    _fair_sp_list = remove_vig(prices_p)
+                    fair_sp  = dict(zip(names_p, _fair_sp_list)) if _fair_sp_list else {}
                     fav_fair_sp = fair_sp.get(fav, 0)
                     fav_pt   = fav_entry["point"]
                     odd_sp, bk_sp = _best_odd_for("spreads", fav, fav_pt)
@@ -614,7 +617,8 @@ def recommend_bets(event: dict, analysis: dict) -> list[dict]:
             prices_b = [o["price"] for o in mkt.get("outcomes", [])]
             if len(names_b) < 2:
                 break
-            fair_b  = dict(zip(names_b, remove_vig(prices_b)))
+            _fair_b_list = remove_vig(prices_b)
+            fair_b  = dict(zip(names_b, _fair_b_list)) if _fair_b_list else {}
             yes_p   = fair_b.get("Yes", 0) * 100
             no_p    = fair_b.get("No",  0) * 100
             odd_yes, bk_yes = _best_odd_for("btts", "Yes")
@@ -667,3 +671,203 @@ def recommend_bets(event: dict, analysis: dict) -> list[dict]:
     _order = {"segura": 0, "sharp": 1, "valor": 2, "combo": 3}
     recs.sort(key=lambda r: (_order.get(r["tipo"], 9), -r["prob_est"]))
     return recs
+
+
+# ─── Outcomes do dia (base do modo probabilidade e do Modo Favoritos) ─────────
+
+def all_outcomes_today(events: list[dict],
+                       markets: list[str] | None = None,
+                       hours_window: float = 48.0) -> list[dict]:
+    """
+    Extrai todos os outcomes das próximas `hours_window` horas com
+    probabilidade justa (devig do mercado da Pinnacle) e a melhor odd
+    disponível nas outras casas (line shopping).
+    """
+    from utils import format_brt as _fmt, hours_until as _hrs, remove_vig as _rv
+
+    if markets is None:
+        markets = ["h2h"]
+
+    _MARKET_LABELS = {
+        "h2h":         "Resultado Final",
+        "draw_no_bet": "Empate Anula",
+        "btts":        "Ambas Marcam",
+    }
+
+    rows = []
+    for event in events:
+        commence = event.get("commence_time", "")
+        h = _hrs(commence)
+        if h is None or h < -4 or h > hours_window:
+            continue
+
+        bookmakers = event.get("bookmakers", [])
+        pinnacle   = next((b for b in bookmakers if b["key"] == "pinnacle"), None)
+        if not pinnacle:
+            continue
+
+        jogo    = f"{event.get('home_team','?')} vs {event.get('away_team','?')}"
+        horario = _fmt(commence)
+        eid     = event.get("id", jogo)
+
+        for mkt in pinnacle.get("markets", []):
+            mkey = mkt["key"]
+            if mkey not in markets:
+                continue
+            if mkey in ("totals", "spreads"):
+                continue  # requerem agrupamento por linha — fora deste modo
+            pin_outcomes = mkt.get("outcomes", [])
+            fair_probs = _rv([o["price"] for o in pin_outcomes])
+            if fair_probs is None:
+                continue
+            label = _MARKET_LABELS.get(mkey, mkey)
+
+            for o, prob in zip(pin_outcomes, fair_probs):
+                name = o["name"]
+                best_odd, best_bk = 1.0, "—"
+                for bk in bookmakers:
+                    if bk["key"] == "pinnacle":
+                        continue
+                    for bk_mkt in bk.get("markets", []):
+                        if bk_mkt["key"] != mkey:
+                            continue
+                        for bo in bk_mkt.get("outcomes", []):
+                            if bo["name"] == name and bo["price"] > best_odd:
+                                best_odd = bo["price"]
+                                best_bk  = bk.get("title", bk["key"])
+
+                rows.append({
+                    "Jogo":          jogo,
+                    "Horário":       horario,
+                    "Mercado":       label,
+                    "Seleção":       name,
+                    "Prob. (%)":     round(prob * 100, 1),
+                    "Melhor Odd":    round(best_odd, 3) if best_odd > 1.0 else None,
+                    "Casa":          best_bk,
+                    "event_id":      eid,
+                    "commence_time": commence,
+                })
+
+    rows.sort(key=lambda x: (x["commence_time"], -x["Prob. (%)"]))
+    return rows
+
+
+# ─── Modo Favoritos ───────────────────────────────────────────────────────────
+
+def favoritos_do_dia(events: list[dict],
+                     min_prob: float = 0.65,
+                     ev_floor: float = 0.0,
+                     bookmaker_filter: list[str] | None = None,
+                     hours_window: float = 48.0) -> list[dict]:
+    """
+    Lista favoritos do dia que passam em TODOS os critérios:
+      1. Prob justa >= min_prob (devig power do 3-way da Pinnacle)
+      2. Melhor odd disponível >= odd justa × (1 + ev_floor) — line shopping
+      3. Mercados: h2h, DNB (derivado do 3-way), Dupla Chance (derivada)
+    """
+    from utils import (bookie_display as _bd, derive_two_way_from_3way,
+                       format_brt as _fmt, hours_until as _hrs, remove_vig as _rv)
+
+    _filter = set(bookmaker_filter) if bookmaker_filter else None
+    rows = []
+
+    for event in events:
+        commence = event.get("commence_time", "")
+        h = _hrs(commence)
+        if h is None or h < -4 or h > hours_window:
+            continue
+
+        bookmakers = event.get("bookmakers", [])
+        pinnacle   = next((b for b in bookmakers if b["key"] == "pinnacle"), None)
+        if not pinnacle:
+            continue
+
+        home = event.get("home_team", "")
+        away = event.get("away_team", "")
+        jogo = f"{home} vs {away}"
+        eid  = event.get("id", jogo)
+
+        pin_markets = {m["key"]: m["outcomes"] for m in pinnacle.get("markets", [])}
+        h2h_pin = pin_markets.get("h2h", [])
+        if len(h2h_pin) < 3:
+            continue
+
+        fair3_list = _rv([o["price"] for o in h2h_pin])
+        if fair3_list is None:
+            continue
+        fair3 = dict(zip([o["name"] for o in h2h_pin], fair3_list))
+        two_way = derive_two_way_from_3way(fair3, home, away)
+
+        # Candidatos: (mercado_key, mercado_label, nome, prob, aliases p/ line shopping)
+        candidates: list[tuple] = []
+        for name, p in fair3.items():
+            candidates.append(("h2h", "Resultado Final", name, p, {name}))
+        for name, p in two_way["dnb"].items():
+            candidates.append(("draw_no_bet", "Empate Anula", name, p, {name}))
+        # DC: agrupa aliases por prob (1X, X2, 12 com seus sinônimos)
+        _dc_groups: dict[float, set] = {}
+        for alias, p in two_way["dc"].items():
+            _dc_groups.setdefault(round(p, 9), set()).add(alias)
+        for p, aliases in _dc_groups.items():
+            display = next((a for a in ("1X", "X2", "12") if a in aliases),
+                           sorted(aliases)[0])
+            candidates.append(("doubleChance", "Dupla Chance", display, p, aliases))
+
+        for mkey, mlabel, name, prob, aliases in candidates:
+            if prob < min_prob:
+                continue
+            aliases_lower = {a.lower() for a in aliases}
+
+            # Line shopping nas casas selecionadas
+            best_odd, best_bk = 0.0, "—"
+            for bk in bookmakers:
+                if bk["key"] == "pinnacle":
+                    continue
+                if _filter and bk["key"] not in _filter:
+                    continue
+                for bk_mkt in bk.get("markets", []):
+                    if bk_mkt["key"] != mkey:
+                        continue
+                    for bo in bk_mkt.get("outcomes", []):
+                        if bo["name"].lower() in aliases_lower and bo["price"] > best_odd:
+                            best_odd = bo["price"]
+                            best_bk  = _bd(bk["key"], bk.get("title", bk["key"]))
+
+            if best_odd <= 1.0:
+                continue
+
+            fair_odd = 1.0 / prob
+            ev = prob * best_odd - 1
+            if ev < ev_floor:
+                continue
+
+            rows.append({
+                "Jogo":           jogo,
+                "Seleção":        name,
+                "Mercado":        mlabel,
+                "Prob. justa (%)": round(prob * 100, 1),
+                "Odd justa":      round(fair_odd, 3),
+                "Melhor odd":     round(best_odd, 3),
+                "Casa":           best_bk,
+                "EV (%)":         round(ev * 100, 2),
+                "Horário (BRT)":  _fmt(commence),
+                "event_id":       eid,
+                "commence_time":  commence,
+            })
+
+    rows.sort(key=lambda r: r["Prob. justa (%)"], reverse=True)
+    return rows
+
+
+def pior_sequencia_esperada(p: float, n: int = 100) -> int:
+    """
+    Maior sequência de derrotas esperada em n apostas com prob de acerto p.
+    Fórmula: floor(log(n) / log(1/(1-p))).
+    """
+    import math
+    q = 1.0 - p
+    if q <= 0:
+        return 0
+    if q >= 1:
+        return n
+    return int(math.floor(math.log(n) / math.log(1.0 / q)))

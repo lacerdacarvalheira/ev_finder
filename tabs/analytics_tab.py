@@ -177,7 +177,11 @@ def render(cfg: dict) -> None:
     clv_bets = [b for b in resolved if b.get("clv") is not None]
     if len(clv_bets) >= 3:
         st.divider()
-        st.subheader("🎲 Luck vs Skill — CLV Analysis")
+        _clv_t, _clv_h = st.columns([11, 1])
+        _clv_t.subheader("🎲 Luck vs Skill — CLV Analysis")
+        with _clv_h:
+            from utils import help_icon
+            help_icon("CLV (Closing Line Value)", key="analytics_clv_help")
         st.caption(
             "**CLV positivo** = você apostou antes que as odds caíssem → edge real, não sorte.  \n"
             "Se o ROI é positivo mas o CLV é negativo, pode ser variância favorável — cuidado."
