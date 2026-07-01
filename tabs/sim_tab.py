@@ -1,4 +1,4 @@
-"""EV Finder — Tab: Simulação de Variância (Monte Carlo)"""
+"""EV Finder — Tab: Simulação de Variância (Monte Carlo) + Kelly Portfólio"""
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
@@ -102,3 +102,109 @@ def render(cfg: dict) -> None:
             "Mesmo com EV positivo, há caminhos de perda — isso é variância normal. "
             "Quanto maior o número de apostas, mais o resultado converge para o valor esperado."
         )
+
+    st.divider()
+
+    # ─── Kelly Portfólio ──────────────────────────────────────────────────────
+    st.subheader("🗂️ Kelly Portfólio — Múltiplas Apostas Simultâneas")
+    st.caption(
+        "Quando você tem várias apostas EV+ ao mesmo tempo, o Kelly individual de cada uma "
+        "superestima quanto apostar — o bankroll é compartilhado. "
+        "Este calculador ajusta proporcionalmente para que as stakes totais não ultrapassem "
+        "uma fração segura do bankroll."
+    )
+
+    pf_bank  = st.number_input("Bankroll disponível (R$)", min_value=10.0,
+                                value=float(bankroll), step=100.0, key="pf_bank")
+    pf_frac  = st.slider("Fração máxima do bankroll a alocar (%)",
+                          min_value=5, max_value=50, value=20, key="pf_frac",
+                          help="Limite total de exposição simultânea. Kelly puro pode recomendar >100% — nunca faça isso.")
+
+    st.markdown("**Apostas no portfólio:**")
+
+    if "pf_bets" not in st.session_state:
+        st.session_state["pf_bets"] = [{"ev": 5.0, "odd": 2.0, "label": "Aposta 1"}]
+
+    pf_bets = st.session_state["pf_bets"]
+
+    cols_h = st.columns([3, 2, 2, 1])
+    cols_h[0].markdown("**Descrição**")
+    cols_h[1].markdown("**EV (%)**")
+    cols_h[2].markdown("**Odd**")
+
+    for i, bet in enumerate(pf_bets):
+        bc1, bc2, bc3, bc4 = st.columns([3, 2, 2, 1])
+        bet["label"] = bc1.text_input("", value=bet["label"], key=f"pf_lab_{i}",
+                                       label_visibility="collapsed")
+        bet["ev"]    = bc2.number_input("", min_value=0.1, max_value=100.0,
+                                         value=float(bet["ev"]), step=0.5,
+                                         key=f"pf_ev_{i}", label_visibility="collapsed",
+                                         format="%.1f")
+        bet["odd"]   = bc3.number_input("", min_value=1.01, max_value=50.0,
+                                          value=float(bet["odd"]), step=0.01,
+                                          key=f"pf_odd_{i}", label_visibility="collapsed",
+                                          format="%.3f")
+        if bc4.button("🗑️", key=f"pf_del_{i}") and len(pf_bets) > 1:
+            pf_bets.pop(i)
+            st.rerun()
+
+    if st.button("➕ Adicionar aposta ao portfólio"):
+        pf_bets.append({"ev": 5.0, "odd": 2.0, "label": f"Aposta {len(pf_bets)+1}"})
+        st.rerun()
+
+    if st.button("📊 Calcular Kelly Portfólio", type="primary"):
+        # Kelly bruto por aposta
+        kellys_raw = []
+        for bet in pf_bets:
+            ev_dec = bet["ev"] / 100
+            odd    = max(bet["odd"], 1.001)
+            k      = ev_dec / (odd - 1)
+            kellys_raw.append(max(k, 0))
+
+        total_kelly = sum(kellys_raw)
+        max_alloc   = pf_frac / 100
+
+        # Escala para não passar do limite
+        if total_kelly > max_alloc:
+            scale = max_alloc / total_kelly
+        else:
+            scale = 1.0
+
+        rows = []
+        for bet, k_raw in zip(pf_bets, kellys_raw):
+            k_adj   = k_raw * scale
+            stake_r = pf_bank * k_adj
+            rows.append({
+                "Aposta":          bet["label"],
+                "Odd":             round(bet["odd"], 3),
+                "EV (%)":          round(bet["ev"], 1),
+                "Kelly bruto (%)": round(k_raw * 100, 2),
+                "Kelly ajustado (%)": round(k_adj * 100, 2),
+                "Stake (R$)":      round(stake_r, 2),
+            })
+
+        import pandas as pd
+        df_pf = pd.DataFrame(rows)
+
+        st.dataframe(df_pf, width='stretch', hide_index=True,
+            column_config={
+                "Odd":                st.column_config.NumberColumn(format="%.3f"),
+                "EV (%)":             st.column_config.NumberColumn(format="%.1f%%"),
+                "Kelly bruto (%)":    st.column_config.NumberColumn(format="%.2f%%"),
+                "Kelly ajustado (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                "Stake (R$)":         st.column_config.NumberColumn(format="R$ %.2f"),
+            })
+
+        total_stake = sum(r["Stake (R$)"] for r in rows)
+        exp_lucro   = sum(r["Stake (R$)"] * r["EV (%)"] / 100 for r in rows)
+        kp1, kp2, kp3 = st.columns(3)
+        kp1.metric("Total alocado",  f"R$ {total_stake:.2f}",
+                   help=f"{total_stake/pf_bank*100:.1f}% do bankroll")
+        kp2.metric("% do bankroll",  f"{total_stake/pf_bank*100:.1f}%")
+        kp3.metric("Lucro esperado", f"R$ {exp_lucro:+.2f}")
+
+        if scale < 1.0:
+            st.info(
+                f"⚠️ Kelly bruto total era **{total_kelly*100:.1f}%** — maior que o limite de {pf_frac}%. "
+                f"Stakes reduzidas proporcionalmente (fator {scale:.2f}×)."
+            )

@@ -15,7 +15,7 @@ except ImportError:
     _HAS_AUTOREFRESH = False
     def st_autorefresh(*a, **kw): return 0  # noqa: E731
 
-from tabs import arb_tab, compare_tab, ev_tab, sim_tab, today_tab, tracker_tab
+from tabs import arb_tab, analytics_tab, compare_tab, ev_tab, sim_tab, today_tab, tracker_tab, watchlist_tab
 from bet_tracker import calc_stats, load_bets
 from ev_calculator import find_opportunities
 from line_cache import get_cache_age, save_snapshot
@@ -319,13 +319,15 @@ if _do_search:
         st.rerun()
 
 # ─── Abas ─────────────────────────────────────────────────────────────────────
-tab_ev, tab_today, tab_arb, tab_compare, tab_tracker, tab_sim = st.tabs([
+tab_ev, tab_today, tab_arb, tab_compare, tab_tracker, tab_sim, tab_analytics, tab_watchlist = st.tabs([
     "🔍 Buscar EV+",
     "📅 Jogos de Hoje",
     "⚡ Arbitragem",
     "📊 Comparativo de Odds",
     "📋 Tracker de Apostas",
     "📈 Simulação de Variância",
+    "📉 Analytics",
+    "👁️ Watchlist",
 ])
 
 _cfg = {
@@ -361,3 +363,9 @@ with tab_tracker:
 
 with tab_sim:
     sim_tab.render(_cfg)
+
+with tab_analytics:
+    analytics_tab.render(_cfg)
+
+with tab_watchlist:
+    watchlist_tab.render(_cfg)

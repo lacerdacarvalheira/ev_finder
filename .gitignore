@@ -9,6 +9,7 @@ config.json
 # Cache de API e histórico de linha (gerados em runtime)
 odds_cache.json
 line_history.json
+watchlist.json
 
 # Python
 __pycache__/

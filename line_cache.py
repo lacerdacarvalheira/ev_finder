@@ -152,3 +152,49 @@ def get_line_history(game_id: str) -> dict:
         return history.get(game_id, {})
     except Exception:
         return {}
+
+
+def detect_steam_moves(game_id: str, bookmaker: str = "pinnacle",
+                       min_pp: float = 3.0) -> list[dict]:
+    """
+    Detecta steam moves: mudanças de probabilidade >= min_pp entre os dois
+    últimos snapshots. Retorna lista ordenada por magnitude de movimento.
+    """
+    history   = get_line_history(game_id)
+    snapshots = history.get("snapshots", [])
+    if len(snapshots) < 2:
+        return []
+
+    snap_prev = snapshots[-2]
+    snap_curr = snapshots[-1]
+    prev_bk   = snap_prev.get("odds", {}).get(bookmaker, {})
+    curr_bk   = snap_curr.get("odds", {}).get(bookmaker, {})
+
+    moves = []
+    for mkt_key in set(prev_bk) & set(curr_bk):
+        prev_map = {o["name"]: o["price"] for o in prev_bk.get(mkt_key, [])}
+        curr_map = {o["name"]: o["price"] for o in curr_bk.get(mkt_key, [])}
+
+        for name in set(prev_map) & set(curr_map):
+            p_then = prev_map[name]
+            p_now  = curr_map[name]
+            if p_then <= 1.0 or p_now <= 1.0:
+                continue
+            prob_then = 1.0 / p_then
+            prob_now  = 1.0 / p_now
+            pp        = (prob_now - prob_then) * 100
+
+            if abs(pp) >= min_pp:
+                moves.append({
+                    "market":     mkt_key,
+                    "outcome":    name,
+                    "price_then": round(p_then, 3),
+                    "price_now":  round(p_now,  3),
+                    "prob_then":  round(prob_then * 100, 1),
+                    "prob_now":   round(prob_now  * 100, 1),
+                    "pp_move":    round(pp, 1),
+                    "direction":  "↑ Steam" if pp > 0 else "↓ Drift",
+                })
+
+    moves.sort(key=lambda x: abs(x["pp_move"]), reverse=True)
+    return moves

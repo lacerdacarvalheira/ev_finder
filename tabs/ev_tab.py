@@ -102,7 +102,37 @@ def render(cfg: dict) -> None:
             )
         return
 
-    st.success(f"✅ {len(opps)} oportunidade(s) | odds entre {odd_min:.2f} e {odd_max:.2f}")
+    # ─── Filtros avançados ────────────────────────────────────────────────────
+    with st.expander("🔎 Filtros avançados", expanded=False):
+        fa1, fa2, fa3 = st.columns(3)
+        _search = fa1.text_input("Buscar time", placeholder="ex: Brasil, France…",
+                                  key="ev_search").strip().lower()
+        _casas_all     = sorted({o["Casa"]    for o in opps})
+        _mercados_all  = sorted({o["Mercado"] for o in opps})
+        _sel_casas     = fa2.multiselect("Casa", _casas_all, default=[],
+                                          placeholder="Todas", key="ev_casas")
+        _sel_mercados  = fa3.multiselect("Mercado", _mercados_all, default=[],
+                                          placeholder="Todos", key="ev_mercados")
+
+    # aplica filtros
+    n_before = len(opps)
+    if _search:
+        opps = [o for o in opps if _search in o["Jogo"].lower()]
+    if _sel_casas:
+        opps = [o for o in opps if o["Casa"] in _sel_casas]
+    if _sel_mercados:
+        opps = [o for o in opps if o["Mercado"] in _sel_mercados]
+
+    n_filtered = n_before - len(opps)
+    _filter_label = (
+        f"✅ {len(opps)} oportunidade(s) "
+        + (f"| {n_filtered} filtradas" if n_filtered else f"| odds {odd_min:.2f}–{odd_max:.2f}")
+    )
+    st.success(_filter_label)
+
+    if not opps:
+        st.info("Nenhuma oportunidade com os filtros aplicados.")
+        return
 
     # Aplica Kelly e bankroll
     df = pd.DataFrame(opps)

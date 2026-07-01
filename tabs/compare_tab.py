@@ -5,9 +5,11 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from line_cache import get_line_history
+from line_cache import detect_steam_moves, get_line_history
 from odds_api import MARKET_OPTIONS
 from utils import remove_vig
+
+_MKT_OPTS = MARKET_OPTIONS
 
 
 def render(cfg: dict) -> None:
@@ -140,3 +142,40 @@ def render(cfg: dict) -> None:
             st.caption(f"Fonte: Pinnacle | {len(snapshots)} pontos de dados coletados")
         else:
             st.caption("Sem dados da Pinnacle para este mercado no histórico.")
+
+    # ─── Steam Moves ──────────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("🌊 Steam Moves")
+    st.caption(
+        "Detecta mudanças bruscas nas probabilidades da Pinnacle (≥ 3pp) "
+        "entre os dois últimos snapshots. Steam = dinheiro sharp entrando."
+    )
+
+    if not game_id:
+        st.caption("ID do jogo não disponível para detecção de steam.")
+    else:
+        steam = detect_steam_moves(game_id, min_pp=3.0)
+        if not steam:
+            st.caption("Nenhum steam move detectado — histórico insuficiente ou mercados estáveis.")
+        else:
+            for mv in steam:
+                mkt_label = _MKT_OPTS.get(mv["market"], mv["market"])
+                pp = mv["pp_move"]
+                badge = "🔴" if abs(pp) >= 6 else ("🟠" if abs(pp) >= 4 else "🟡")
+                direction_color = "green" if pp > 0 else "red"
+                col_a, col_b, col_c = st.columns([3, 2, 2])
+                with col_a:
+                    st.markdown(f"{badge} **{mv['outcome']}** — {mkt_label}")
+                with col_b:
+                    st.markdown(
+                        f":{direction_color}[{mv['direction']} {abs(pp):+.1f}pp]  \n"
+                        f"{mv['price_then']:.3f} → {mv['price_now']:.3f}"
+                    )
+                with col_c:
+                    st.markdown(
+                        f"Prob: {mv['prob_then']:.1f}% → **{mv['prob_now']:.1f}%**"
+                    )
+            st.caption(
+                "🔴 ≥6pp = movimento forte  🟠 ≥4pp = moderado  🟡 ≥3pp = leve. "
+                "Steam = apostadores sharps entrando no lado que subiu."
+            )
