@@ -1,7 +1,4 @@
 """EV Finder — Tab: Analytics de Performance"""
-from collections import defaultdict
-from datetime import datetime
-
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st

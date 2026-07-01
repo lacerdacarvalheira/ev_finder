@@ -1,5 +1,6 @@
 """EV Finder — Tab: Simulação de Variância (Monte Carlo) + Kelly Portfólio"""
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -183,7 +184,6 @@ def render(cfg: dict) -> None:
                 "Stake (R$)":      round(stake_r, 2),
             })
 
-        import pandas as pd
         df_pf = pd.DataFrame(rows)
 
         st.dataframe(df_pf, width='stretch', hide_index=True,

@@ -124,15 +124,19 @@ def render(cfg: dict) -> None:
         opps = [o for o in opps if o["Mercado"] in _sel_mercados]
 
     n_filtered = n_before - len(opps)
+
+    if not opps:
+        st.warning(
+            f"⚠️ Nenhuma oportunidade com os filtros aplicados "
+            f"({n_filtered} oportunidade(s) filtradas)."
+        )
+        return
+
     _filter_label = (
         f"✅ {len(opps)} oportunidade(s) "
         + (f"| {n_filtered} filtradas" if n_filtered else f"| odds {odd_min:.2f}–{odd_max:.2f}")
     )
     st.success(_filter_label)
-
-    if not opps:
-        st.info("Nenhuma oportunidade com os filtros aplicados.")
-        return
 
     # Aplica Kelly e bankroll
     df = pd.DataFrame(opps)
