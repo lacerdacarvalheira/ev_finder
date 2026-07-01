@@ -29,6 +29,20 @@ def _has_same_event(rows: list[dict]) -> bool:
     return len(ids) != len(set(ids))
 
 
+def _diverse_pool(opps: list[dict], max_per_event: int = 2) -> list[dict]:
+    """Round-robin across events: pega as N melhores apostas de cada jogo."""
+    by_event: dict[str, list[dict]] = {}
+    for o in opps:
+        key = o.get("event_id") or o["Jogo"]
+        by_event.setdefault(key, []).append(o)
+    pool: list[dict] = []
+    for rank in range(max_per_event):
+        for bets in by_event.values():
+            if rank < len(bets):
+                pool.append(bets[rank])
+    return pool
+
+
 def _ev_bg(val: float) -> str:
     if val >= 15: return "background-color:#155724;color:white;font-weight:bold"
     if val >= 10: return "background-color:#1e7e34;color:white;font-weight:bold"
@@ -147,15 +161,22 @@ def render(cfg: dict) -> None:
 
     # ── Sugestões Automáticas ─────────────────────────────────────────────────
     st.markdown("### 🤖 Melhores Combinações do Dia")
-    st.caption("Geradas a partir das top 20 oportunidades EV+ da última busca.")
 
-    col_n, col_min, col_max_odd = st.columns(3)
+    col_n, col_min, col_max_odd, col_per_ev = st.columns(4)
     n_legs      = col_n.radio("Seleções por múltipla", [2, 3], horizontal=True, key="m_legs")
     min_ev_m    = col_min.slider("EV mínimo (%)", -20, 50, 0, key="m_min_ev")
-    max_odd_m   = col_max_odd.number_input("Odd máxima da múltipla", min_value=2.0,
+    max_odd_m   = col_max_odd.number_input("Odd máxima", min_value=2.0,
                                             max_value=500.0, value=50.0, step=5.0, key="m_max_odd")
+    max_per_ev  = col_per_ev.number_input("Apostas por jogo", min_value=1,
+                                           max_value=5, value=2, step=1, key="m_per_ev",
+                                           help="Máximo de seleções por jogo no pool automático")
 
-    pool = opps[:20]
+    pool = _diverse_pool(opps, max_per_event=int(max_per_ev))
+    n_jogos = len({o.get("event_id") or o["Jogo"] for o in pool})
+    st.caption(
+        f"Pool: **{len(pool)} seleções** de **{n_jogos} jogos distintos** "
+        f"({int(max_per_ev)} melhor(es) EV+ por jogo)."
+    )
 
     combos: list[dict] = []
     for combo in combinations(pool, n_legs):
