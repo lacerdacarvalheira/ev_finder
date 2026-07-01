@@ -29,22 +29,43 @@ SOCCER_LEAGUES: dict[str, str] = {
 
 # Nomes legíveis por chave de casa de apostas
 BOOKMAKER_DISPLAY: dict[str, str] = {
+    # ── Referência / vig source ───────────────────────────────────────────────
     "pinnacle":         "Pinnacle",
+    # ── Disponíveis no tier atual da API ─────────────────────────────────────
+    "betfair_ex_eu":    "Betfair Exchange",
+    "williamhill":      "William Hill",
+    "betclic_fr":       "Betclic",
+    "sport888":         "888sport",
+    "betsson":          "Betsson",
+    "marathonbet":      "Marathonbet",
+    "nordicbet":        "NordicBet",
+    "leovegas_se":      "LeoVegas",
+    "matchbook":        "Matchbook",
+    "unibet_fr":        "Unibet (FR)",
+    "unibet_nl":        "Unibet (NL)",
+    "unibet_se":        "Unibet (SE)",
+    "winamax_fr":       "Winamax (FR)",
+    "winamax_de":       "Winamax (DE)",
+    "tipico_de":        "Tipico",
+    "codere_it":        "Codere",
+    "onexbet":          "1xBet",
+    "pmu_fr":           "PMU (FR)",
+    "betanysports":     "BetAnything",
+    "betonlineag":      "BetOnline.ag",
+    "mybookieag":       "MyBookie.ag",
+    "gtbets":           "GTbets",
+    "everygame":        "Everygame",
+    # ── Casas fora do tier atual (mantidas como opções) ───────────────────────
     "bet365":           "Bet365",
     "betano":           "Betano",
     "superbet":         "Superbet",
-    "betfair_ex_eu":    "Betfair Exchange",
     "unibet_eu":        "Unibet",
-    "williamhill":      "William Hill",
     "bwin":             "bwin",
-    "1xbet":            "1xBet",
-    "marathonbet":      "Marathonbet",
     "betway":           "Betway",
-    "nordicbet":        "NordicBet",
-    "betsson":          "Betsson",
-    "888sport":         "888sport",
     "draftkings":       "DraftKings",
     "fanduel":          "FanDuel",
+    "1xbet":            "1xBet (alt)",
+    "888sport":         "888sport (alt)",
 }
 
 # Mercados suportados e seus nomes em português

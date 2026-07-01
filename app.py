@@ -118,8 +118,8 @@ with st.sidebar:
 
     # — Casas de apostas —
     _bk_keys     = [k for k in BOOKMAKER_DISPLAY if k != "pinnacle"]
-    _bk_defaults = config.get("selected_bookmakers",
-                               ["bet365", "superbet", "betano", "unibet_eu", "bwin"])
+    _QUICK_CASAS = ["betfair_ex_eu", "williamhill", "betclic_fr", "sport888", "betsson"]
+    _bk_defaults = config.get("selected_bookmakers", _QUICK_CASAS)
     _bk_defaults = [k for k in _bk_defaults if k in _bk_keys]  # garante validade
     selected_bookmaker_keys = st.multiselect(
         "Casas de apostas",
@@ -130,9 +130,9 @@ with st.sidebar:
         key="bookmaker_select",
     )
     _bk_col1, _bk_col2 = st.columns(2)
-    if _bk_col1.button("✅ Bet365 + Superbet", use_container_width=True,
-                        help="Seleciona apenas Bet365 e Superbet"):
-        save_config({**config, "selected_bookmakers": ["bet365", "superbet"]})
+    if _bk_col1.button("⭐ Principais casas", use_container_width=True,
+                        help="Betfair, William Hill, Betclic, 888sport, Betsson"):
+        save_config({**config, "selected_bookmakers": _QUICK_CASAS})
         st.rerun()
     if _bk_col2.button("🌍 Todas as casas", use_container_width=True,
                         help="Remove filtro — mostra todas"):
