@@ -1,6 +1,7 @@
 # Dados sensíveis — nunca commitar
 config.json
 .env
+.streamlit/secrets.toml
 
 # Banco de dados local
 *.db

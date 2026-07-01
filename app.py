@@ -57,6 +57,11 @@ with st.sidebar:
     # — API Key —
     st.subheader("🔑 API Key")
     _env_key = os.environ.get("ODDS_API_KEY", "")
+    if not _env_key:
+        try:
+            _env_key = st.secrets.get("ODDS_API_KEY", "")
+        except Exception:
+            pass
     api_key = st.text_input(
         "The Odds API Key",
         value=_env_key or config.get("api_key", ""),
@@ -182,16 +187,24 @@ with st.sidebar:
 
     # — Telegram —
     st.subheader("📲 Telegram (opcional)")
+    _tg_token_default = config.get("telegram_token", "")
+    _tg_chat_default  = config.get("telegram_chat_id", "")
+    if not _tg_token_default:
+        try:
+            _tg_token_default = st.secrets.get("TELEGRAM_TOKEN", "")
+            _tg_chat_default  = st.secrets.get("TELEGRAM_CHAT_ID", "")
+        except Exception:
+            pass
     tg_token   = st.text_input(
         "Bot Token",
-        value=config.get("telegram_token", ""),
+        value=_tg_token_default,
         type="password",
         placeholder="123456789:AAF...",
         help="Obtenha em @BotFather. Deixe vazio para desativar.",
     )
     tg_chat_id = st.text_input(
         "Chat ID",
-        value=config.get("telegram_chat_id", ""),
+        value=_tg_chat_default,
         placeholder="-100123456789",
         help="ID do seu chat ou grupo. Envie /start para o bot e acesse getUpdates.",
     )

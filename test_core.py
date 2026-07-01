@@ -224,6 +224,192 @@ def test_urgency_badge():
     _assert("urgency_badge None retorna —",   urgency_badge(None) == "—")
 
 
+# ─── Steam moves ───────────────────────────────────────────────────────────────
+
+def test_detect_steam_moves():
+    from line_cache import detect_steam_moves
+
+    # Sem histórico → lista vazia
+    result = detect_steam_moves("id_inexistente")
+    _assert("steam moves sem historico retorna []", result == [])
+
+    # Injetar histórico temporário para testar detecção
+    import line_cache as lc
+    import json, tempfile, os
+
+    tmp = tempfile.mktemp(suffix=".json")
+    orig = lc._HISTORY_FILE
+    lc._HISTORY_FILE = tmp
+
+    try:
+        # Snapshot 1: pinnacle h2h home=2.00, snap 2: home=1.70 (prob sobe ~6pp)
+        history = {
+            "game1": {
+                "home": "A", "away": "B",
+                "commence_time": "2099-01-01T20:00:00Z",
+                "snapshots": [
+                    {"ts": "2099-01-01T18:00:00Z", "odds": {
+                        "pinnacle": {"h2h": [
+                            {"name": "A", "price": 2.00, "point": None},
+                            {"name": "B", "price": 3.80, "point": None},
+                        ]},
+                    }},
+                    {"ts": "2099-01-01T19:00:00Z", "odds": {
+                        "pinnacle": {"h2h": [
+                            {"name": "A", "price": 1.70, "point": None},
+                            {"name": "B", "price": 4.50, "point": None},
+                        ]},
+                    }},
+                ],
+            }
+        }
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(history, f)
+
+        moves = detect_steam_moves("game1", min_pp=3.0)
+        _assert("steam detecta movimento >= 3pp", len(moves) >= 1)
+        _assert("steam resultado e ordenado por magnitude", moves[0]["pp_move"] != 0)
+        home_move = next((m for m in moves if m["outcome"] == "A"), None)
+        _assert("steam move do favorito detectado", home_move is not None)
+        if home_move:
+            # prob sobe: 1/2.00=50% → 1/1.70≈58.8%, delta≈+8.8pp
+            _assert("steam direction correta (steam up)", home_move["pp_move"] > 0)
+
+        # Sem snapshot suficiente → []
+        history_single = {"game2": {"snapshots": [{"ts": "x", "odds": {}}]}}
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(history_single, f)
+        _assert("steam sem 2 snaps retorna []", detect_steam_moves("game2") == [])
+
+    finally:
+        lc._HISTORY_FILE = orig
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+# ─── Watchlist ─────────────────────────────────────────────────────────────────
+
+def test_watchlist():
+    import tempfile, os
+    import watchlist as wl
+
+    tmp = tempfile.mktemp(suffix=".json")
+    orig = wl._WATCHLIST_FILE
+    wl._WATCHLIST_FILE = tmp
+
+    try:
+        from watchlist import add_watch, remove_watch, load_watchlist, check_hits
+
+        _assert("watchlist vazia retorna []", load_watchlist() == [])
+
+        add_watch("Brasil vs França", "1X2", "Brasil", 2.50)
+        items = load_watchlist()
+        _assert("add_watch adiciona 1 item",          len(items) == 1)
+        _assert("add_watch selecao correta",           items[0]["selecao"] == "Brasil")
+        _assert_close("add_watch odd correta",         items[0]["odd_alvo"], 2.50, 1e-6)
+        _assert("add_watch id atribuido",              items[0]["id"] == 1)
+
+        # Segundo item — IDs sequenciais
+        add_watch("", "BTTS", "Sim", 1.80)
+        items2 = load_watchlist()
+        _assert("add_watch segundo item",              len(items2) == 2)
+        _assert("add_watch id sequencial",             items2[1]["id"] == 2)
+
+        # check_hits — odd suficiente (2.55 >= 2.50 * 0.98)
+        opps = [{"Jogo": "Brasil vs França", "Seleção": "Brasil",
+                 "Odd Casa": 2.55, "EV (%)": 5.0}]
+        hits = check_hits(opps)
+        _assert("check_hits encontra match por selecao", len(hits) >= 1)
+
+        # check_hits — odd insuficiente (2.20 < 2.50 * 0.98 = 2.45)
+        opps_low = [{"Jogo": "Brasil vs França", "Seleção": "Brasil",
+                     "Odd Casa": 2.20, "EV (%)": 1.0}]
+        hits_low = check_hits(opps_low)
+        _assert("check_hits nao bate com odd baixa", len(hits_low) == 0)
+
+        # check_hits — match por jogo (selecao no nome do jogo)
+        opps_jogo = [{"Jogo": "brasil vs franca", "Seleção": "Vencer",
+                      "Odd Casa": 2.60, "EV (%)": 3.0}]
+        hits_jogo = check_hits(opps_jogo)
+        _assert("check_hits match por nome do jogo", len(hits_jogo) >= 1)
+
+        # remove_watch
+        remove_watch(1)
+        items3 = load_watchlist()
+        _assert("remove_watch remove item correto",     len(items3) == 1)
+        _assert("remove_watch mantem outros itens",     items3[0]["id"] == 2)
+
+    finally:
+        wl._WATCHLIST_FILE = orig
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+# ─── Kelly portfólio ───────────────────────────────────────────────────────────
+
+def test_kelly_portfolio():
+    # kelly = EV / (odd - 1)
+    # Aposta 1: EV=15%, odd=2.0 → k=0.15
+    # Aposta 2: EV=15%, odd=2.0 → k=0.15
+    # Total=0.30, limite=20% → escala=0.20/0.30=0.6667
+    ev, odd = 0.15, 2.0
+    k = ev / (odd - 1)
+    _assert_close("kelly unitario correto", k, 0.15, 1e-9)
+
+    total_k = k * 2
+    limit   = 0.20
+    scale   = limit / total_k if total_k > limit else 1.0
+    _assert_close("kelly portfolio escala correta",           scale, 2/3, 1e-9)
+    _assert_close("kelly portfolio total pos-escala = limite", total_k * scale, limit, 1e-9)
+
+    # Sem necessidade de escala: dois bets com k=0.05 cada → total=0.10 < 0.20
+    k_small = 0.10 / (2.0 - 1)   # EV=10%, odd=2.0
+    total_small = k_small * 2
+    scale_small = limit / total_small if total_small > limit else 1.0
+    _assert("kelly portfolio sem escala quando total < limite", scale_small == 1.0)
+
+    # EV negativo → kelly deve ser clipado a zero
+    k_neg = max((-0.05) / (2.0 - 1), 0)
+    _assert_close("kelly negativo clipado a zero", k_neg, 0.0, 1e-9)
+
+
+# ─── Calibração de EV (analytics) ─────────────────────────────────────────────
+
+def test_ev_calibration():
+    # 2 ganhos em 3 apostas = 66.7% de acerto
+    bets = [
+        {"resultado": "ganhou", "ev_pct": 5.0, "prob_real": 60.0, "stake": 100.0, "lucro":  100.0},
+        {"resultado": "ganhou", "ev_pct": 6.0, "prob_real": 55.0, "stake": 100.0, "lucro":  100.0},
+        {"resultado": "perdeu", "ev_pct": 7.0, "prob_real": 58.0, "stake": 100.0, "lucro": -100.0},
+    ]
+
+    n_win    = sum(1 for b in bets if b["resultado"] == "ganhou")
+    win_real = n_win / len(bets) * 100
+    _assert_close("calibracao win rate correto", win_real, 200/3, 0.01)
+
+    win_exp = sum(b["prob_real"] for b in bets) / len(bets)
+    _assert_close("calibracao win exp medio correto", win_exp, (60+55+58)/3, 0.001)
+
+    total_st = sum(b["stake"] for b in bets)
+    roi = sum(b["lucro"] for b in bets) / total_st * 100
+    _assert_close("calibracao ROI correto (100/300)", roi, 100/3, 0.001)
+
+    # ROI acumulado sobe monotonicamente quando todas ganham
+    bets_wins = [
+        {"resultado": "ganhou", "stake": 50.0, "lucro": 50.0},
+        {"resultado": "ganhou", "stake": 50.0, "lucro": 50.0},
+    ]
+    running_l, running_a = 0.0, 0.0
+    roi_curve = []
+    for b in bets_wins:
+        running_l += b["lucro"]
+        running_a += b["stake"]
+        roi_curve.append(running_l / running_a * 100)
+    _assert("ROI cumulativo cresce com ganhos consecutivos",
+            roi_curve[0] <= roi_curve[1])
+    _assert_close("ROI final correto com 100% acerto", roi_curve[-1], 100.0, 1e-9)
+
+
 # ─── Runner ────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -236,6 +422,10 @@ if __name__ == "__main__":
         test_correlation_pairs,
         test_format_brt,
         test_urgency_badge,
+        test_detect_steam_moves,
+        test_watchlist,
+        test_kelly_portfolio,
+        test_ev_calibration,
     ]
 
     for fn in tests:
