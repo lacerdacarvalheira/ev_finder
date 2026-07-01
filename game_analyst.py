@@ -556,25 +556,30 @@ def recommend_bets(event: dict, analysis: dict) -> list[dict]:
             for mkt in pinnacle.get("markets", []):
                 if mkt["key"] != "spreads":
                     continue
-                # Procura AH -0.5 para o favorito
-                by_pt: dict = defaultdict(dict)
+                # The Odds API: England -1.5 e Slovakia +1.5 são lados opostos
+                # da mesma linha. Agrupa por abs(point) para parear corretamente.
+                by_line: dict = defaultdict(dict)
                 for o in mkt.get("outcomes", []):
-                    if o.get("point") is not None:
-                        by_pt[o["point"]][o["name"]] = o["price"]
+                    pt = o.get("point")
+                    if pt is not None:
+                        by_line[abs(pt)][o["name"]] = {"price": o["price"], "point": pt}
 
-                for pt, pair in by_pt.items():
-                    if pt not in (-0.5, -1.0, -1.5):
+                for line_key, entries in sorted(by_line.items()):
+                    if line_key not in (0.5, 1.0, 1.5):
                         continue
-                    fav_price = pair.get(fav)
-                    if not fav_price:
+                    if len(entries) < 2:
                         continue
-                    names_p  = list(pair.keys())
-                    prices_p = [pair[n] for n in names_p]
+                    fav_entry = entries.get(fav)
+                    if not fav_entry or fav_entry["point"] >= 0:
+                        continue  # favorito deve ter handicap negativo
+                    names_p  = list(entries.keys())
+                    prices_p = [entries[n]["price"] for n in names_p]
                     fair_sp  = dict(zip(names_p, remove_vig(prices_p)))
                     fav_fair_sp = fair_sp.get(fav, 0)
-                    odd_sp, bk_sp = _best_odd_for("spreads", fav, pt)
+                    fav_pt   = fav_entry["point"]
+                    odd_sp, bk_sp = _best_odd_for("spreads", fav, fav_pt)
                     if odd_sp > 1 and fav_fair_sp >= 0.50:
-                        sign = f"{pt:+g}"
+                        sign = f"{fav_pt:+g}"
                         recs.append(_rec(
                             "Handicap Asiático", f"{fav} {sign}", odd_sp, bk_sp,
                             fav_fair_sp * 100, "media", "valor",

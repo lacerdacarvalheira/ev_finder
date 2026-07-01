@@ -375,6 +375,38 @@ def test_kelly_portfolio():
 
 # ─── Calibração de EV (analytics) ─────────────────────────────────────────────
 
+def test_spreads_grouping():
+    """
+    Regression: The Odds API dá pontos opostos por time (England -1.5, Slovakia +1.5).
+    remove_vig de lista com 1 item devolve a ODD, não a probabilidade — causando
+    prob 185%+ e EV 300%+ antes da correção.
+    """
+    from ev_calculator import _process_spreads
+
+    # Simula exatamente o formato da API: pontos opostos
+    pin = [
+        {"name": "England",  "price": 1.85, "point": -1.5},
+        {"name": "Slovakia", "price": 2.05, "point":  1.5},
+    ]
+    bk = [
+        {"name": "England",  "price": 2.04, "point": -1.5},
+        {"name": "Slovakia", "price": 1.87, "point":  1.5},
+    ]
+    meta = {"jogo": "England vs Slovakia", "hora": "", "liga": "",
+            "commence_time_raw": "", "event_id": "x1"}
+
+    rows = _process_spreads(pin, bk, meta, "Matchbook", min_ev=0.0)
+
+    # Deve encontrar resultados (antes da correção = lista vazia pq len<2 guard)
+    _assert("spreads retorna resultados", len(rows) >= 1)
+
+    for r in rows:
+        prob = r["Prob. Real (%)"]
+        ev   = r["EV (%)"]
+        _assert(f"prob <= 100% ({prob:.1f}%)", prob <= 100.0)
+        _assert(f"EV < 50% ({ev:.1f}%)", ev < 50.0)  # impossível EV genuíno de 300%
+
+
 def test_ev_calibration():
     # 2 ganhos em 3 apostas = 66.7% de acerto
     bets = [
@@ -425,6 +457,7 @@ if __name__ == "__main__":
         test_detect_steam_moves,
         test_watchlist,
         test_kelly_portfolio,
+        test_spreads_grouping,
         test_ev_calibration,
     ]
 

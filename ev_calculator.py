@@ -118,41 +118,46 @@ def _process_totals(pin, bk, meta, bookie, min_ev,
 def _process_spreads(pin, bk, meta, bookie, min_ev,
                      market_label="Handicap Asiático"):
     """
-    Handicap asiático — emparelha linhas pelo valor do ponto.
-    Ex: Home -0.5 @ 1.85 vs Away +0.5 @ 2.05 (Pinnacle)
-        Home -0.5 @ 1.96 (Bookmaker) → EV calculado
+    Handicap asiático — emparelha linhas pelo valor absoluto do ponto.
+
+    The Odds API dá pontos opostos para cada lado do mesmo handicap:
+      England -1.5  e  Slovakia +1.5  → linha 1.5
+    Agrupamos por abs(point) para juntar os dois lados antes de remove_vig.
     """
-    pin_by_pt: dict = defaultdict(dict)
+    # {abs_point: {name: {"price": ..., "point": ...}}}
+    pin_by_line: dict = defaultdict(dict)
     for o in pin:
         pt = o.get("point")
         if pt is not None:
-            pin_by_pt[pt][o["name"]] = o["price"]
+            pin_by_line[abs(pt)][o["name"]] = {"price": o["price"], "point": pt}
 
-    bk_by_pt: dict = defaultdict(dict)
+    bk_by_line: dict = defaultdict(dict)
     for o in bk:
         pt = o.get("point")
         if pt is not None:
-            bk_by_pt[pt][o["name"]] = o["price"]
+            bk_by_line[abs(pt)][o["name"]] = {"price": o["price"], "point": pt}
 
     rows = []
-    for point, pin_pair in pin_by_pt.items():
-        if len(pin_pair) < 2:
+    for line_key, pin_entries in pin_by_line.items():
+        if len(pin_entries) < 2:
             continue
-        bk_pair = bk_by_pt.get(point)
-        if not bk_pair:
+        bk_entries = bk_by_line.get(line_key, {})
+        if not bk_entries:
             continue
 
-        names = list(pin_pair.keys())
-        fair  = dict(zip(names, remove_vig([pin_pair[n] for n in names])))
+        names = list(pin_entries.keys())
+        fair  = dict(zip(names, remove_vig([pin_entries[n]["price"] for n in names])))
 
-        for name, price in bk_pair.items():
-            prob = fair.get(name)
+        for name, entry in bk_entries.items():
+            price = entry["price"]
+            prob  = fair.get(name)
             if prob is None:
                 continue
             ev = (prob * price) - 1
             if ev >= min_ev:
-                sign  = "+" if point > 0 else ""
-                label = f"{name} {sign}{point}"
+                pt    = entry["point"]
+                sign  = f"{pt:+g}" if pt is not None else ""
+                label = f"{name} {sign}"
                 _safe_append(rows, meta, market_label, label, price, prob, bookie, ev)
     return rows
 
