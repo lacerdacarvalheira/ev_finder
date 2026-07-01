@@ -1,0 +1,27 @@
+# Dados sensíveis — nunca commitar
+config.json
+.env
+
+# Banco de dados local
+*.db
+*.db-journal
+
+# Cache de API e histórico de linha (gerados em runtime)
+odds_cache.json
+line_history.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Logs
+ev_finder.log
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
