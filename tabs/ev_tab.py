@@ -196,6 +196,13 @@ def render(cfg: dict) -> None:
     st.subheader("🔎 Análise detalhada")
     st.caption("Selecione uma oportunidade para ver a análise e registrar a aposta.")
 
+    user_bancas = {c: v for c, v in (cfg.get("bankrolls") or {}).items() if v > 0}
+    if user_bancas:
+        st.caption(
+            "💰 Kelly calculado sobre o saldo da casa escolhida: "
+            + " · ".join(f"**{c}** R$ {v:,.0f}" for c, v in user_bancas.items())
+        )
+
     for i, row in enumerate(df.to_dict("records")):
         prob    = row["Prob. Real (%)"]
         ev      = row["EV (%)"]
@@ -218,21 +225,40 @@ def render(cfg: dict) -> None:
                     f"**+{ev:.2f}% EV** — a cada R$100 apostados nesta seleção ao longo do tempo, "
                     f"retorno esperado de **R${100 * (1 + ev/100):.0f}**."
                 )
-                st.markdown(
-                    f"**Kelly ({kelly_label}):** {kelly_r:.2f}% = **R$ {valor_r:.2f}** "
-                    f"(bankroll: R$ {bankroll:,.0f})"
-                )
+                if user_bancas:
+                    st.markdown(
+                        f"**Kelly ({kelly_label}):** {kelly_r:.2f}% do saldo da casa — "
+                        + " · ".join(
+                            f"{c}: **R$ {v * kelly_r / 100:.2f}**"
+                            for c, v in user_bancas.items()
+                        )
+                    )
+                else:
+                    st.markdown(
+                        f"**Kelly ({kelly_label}):** {kelly_r:.2f}% = **R$ {valor_r:.2f}** "
+                        f"(bankroll: R$ {bankroll:,.0f})"
+                    )
             with col_b:
+                if user_bancas:
+                    casa_bet = st.selectbox(
+                        "Apostar na", list(user_bancas.keys()), key=f"casa_bet_{i}",
+                        help="O stake usa o saldo desta casa. Confira a odd nela — "
+                             "se for diferente, ajuste no Tracker.",
+                    )
+                    stake_reg = round(user_bancas[casa_bet] * kelly_r / 100, 2)
+                else:
+                    casa_bet  = casa
+                    stake_reg = valor_r
                 if st.button("➕ Registrar aposta", key=f"reg_{i}"):
                     st.session_state["pending_bet"] = {
                         "jogo":      row["Jogo"],
                         "mercado":   row["Mercado"],
                         "selecao":   sel,
                         "odd":       odd_c,
-                        "stake":     valor_r,
+                        "stake":     stake_reg,
                         "ev_pct":    ev,
                         "prob_real": prob,
-                        "casa":      casa,
+                        "casa":      casa_bet,
                     }
                     st.toast("Aposta copiada! Vá para a aba 📋 Tracker.", icon="📋")
 

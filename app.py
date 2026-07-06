@@ -74,17 +74,36 @@ with st.sidebar:
 
     st.divider()
 
-    # — Bankroll & Kelly —
-    st.subheader("💰 Bankroll & Kelly")
-    bankroll = st.number_input(
-        "Bankroll total (R$)",
-        min_value=10.0, max_value=1_000_000.0,
-        value=float(config.get("bankroll", 1000)),
-        step=100.0,
-    )
-    if st.button("💾 Salvar bankroll", width='stretch'):
-        save_config({**config, "bankroll": bankroll})
-        st.toast(f"Bankroll de R$ {bankroll:,.0f} salvo!", icon="✅")
+    # — Bancas & Kelly —
+    st.subheader("💰 Bancas & Kelly")
+    st.caption("Saldo em cada casa onde você aposta. O Kelly é calculado sobre o saldo da casa escolhida na hora de registrar.")
+    CASAS_USUARIO = ["Superbet", "Bet365", "Betano"]
+    _bk_saved = config.get("bankrolls", {})
+    bankrolls: dict[str, float] = {}
+    for _casa in CASAS_USUARIO:
+        bankrolls[_casa] = st.number_input(
+            f"Saldo {_casa} (R$)",
+            min_value=0.0, max_value=1_000_000.0,
+            value=float(_bk_saved.get(_casa, 0.0)),
+            step=50.0,
+            key=f"saldo_{_casa}",
+        )
+    _total_bancas = sum(bankrolls.values())
+
+    if _total_bancas > 0:
+        bankroll = _total_bancas
+        st.caption(f"**Banca total:** R$ {bankroll:,.2f}")
+    else:
+        bankroll = st.number_input(
+            "Bankroll total (R$)",
+            min_value=10.0, max_value=1_000_000.0,
+            value=float(config.get("bankroll", 1000)),
+            step=100.0,
+            help="Usado enquanto os saldos por casa estiverem zerados.",
+        )
+    if st.button("💾 Salvar bancas", width='stretch'):
+        save_config({**config, "bankrolls": bankrolls, "bankroll": bankroll})
+        st.toast(f"Bancas salvas! Total: R$ {bankroll:,.2f}", icon="✅")
 
     kelly_map = {
         "1/4 Kelly (conservador)": 0.25,
@@ -282,7 +301,9 @@ _bets_all  = load_bets()
 _stats_all = calc_stats(_bets_all)
 
 d1, d2, d3, d4, d5 = st.columns(5)
-d1.metric("Bankroll (R$)", f"{bankroll:,.0f}")
+_bk_detail = " · ".join(f"{c}: R$ {v:,.0f}" for c, v in bankrolls.items() if v > 0)
+d1.metric("Bankroll (R$)", f"{bankroll:,.0f}",
+          help=_bk_detail or "Configure os saldos por casa na barra lateral.")
 d2.metric(
     "Apostas pendentes",
     _stats_all["pendentes"],
@@ -393,6 +414,7 @@ tab_ev, tab_today, tab_favoritos, tab_arb, tab_compare, tab_multiplas, tab_track
 _cfg = {
     "api_key":               api_key,
     "bankroll":              bankroll,
+    "bankrolls":             bankrolls,
     "kelly_frac":            kelly_frac,
     "kelly_label":           kelly_label,
     "kelly_map":             kelly_map,

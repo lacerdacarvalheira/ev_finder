@@ -115,7 +115,20 @@ def render(cfg: dict) -> None:
     )
 
     # ── Registro com um clique ────────────────────────────────────────────────
-    st.markdown(f"**Stake flat:** {stake_pct:.1f}% da banca = **R$ {stake_valor:.2f}** por aposta")
+    user_bancas = {c: v for c, v in (cfg.get("bankrolls") or {}).items() if v > 0}
+    if user_bancas:
+        casa_reg = st.selectbox(
+            "Registrar apostas na casa", list(user_bancas.keys()), key="fav_casa_reg",
+            help="O stake flat usa o saldo desta casa. Confira a odd nela antes de apostar.",
+        )
+        stake_valor = round(user_bancas[casa_reg] * stake_pct / 100, 2)
+        st.markdown(
+            f"**Stake flat:** {stake_pct:.1f}% do saldo da {casa_reg} "
+            f"(R$ {user_bancas[casa_reg]:,.2f}) = **R$ {stake_valor:.2f}** por aposta"
+        )
+    else:
+        casa_reg = None
+        st.markdown(f"**Stake flat:** {stake_pct:.1f}% da banca = **R$ {stake_valor:.2f}** por aposta")
     for i, f in enumerate(favoritos):
         rc1, rc2 = st.columns([8, 2])
         rc1.markdown(
@@ -128,7 +141,7 @@ def render(cfg: dict) -> None:
                 jogo=f["Jogo"], mercado=f["Mercado"], selecao=f["Seleção"],
                 odd=f["Melhor odd"], stake=stake_valor,
                 ev_pct=f["EV (%)"], prob_real=f["Prob. justa (%)"],
-                casa=f["Casa"], tipo_rec="favoritos",
+                casa=casa_reg or f["Casa"], tipo_rec="favoritos",
             )
             st.toast(f"Aposta registrada (modo favoritos): {f['Seleção']}", icon="⭐")
 
@@ -166,7 +179,8 @@ def render(cfg: dict) -> None:
             )
 
     st.divider()
-    _painel_risco(favoritos, min_prob / 100, stake_pct / 100, bankroll)
+    banca_sim = user_bancas[casa_reg] if user_bancas else bankroll
+    _painel_risco(favoritos, min_prob / 100, stake_pct / 100, banca_sim)
 
 
 # ─── Painel de Risco ──────────────────────────────────────────────────────────
