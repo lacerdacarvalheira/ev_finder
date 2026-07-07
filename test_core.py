@@ -610,6 +610,22 @@ def test_bankroll_history():
         _assert("análise com 1 snapshot retorna None",
                 bh.analise_evolucao(hist[:1], bets) is None)
 
+        # Série diária com forward-fill
+        from datetime import date
+        fake_hist = [
+            {"data": "01/07/2026 10:00", "total": 800.0,  "bankrolls": {}},
+            {"data": "01/07/2026 18:00", "total": 850.0,  "bankrolls": {}},  # último do dia vence
+            {"data": "04/07/2026 12:00", "total": 1000.0, "bankrolls": {}},
+        ]
+        serie = bh.serie_diaria(fake_hist, ate=date(2026, 7, 6))
+        _assert_close("serie: último snapshot do dia vence", serie[date(2026, 7, 1)], 850.0, 1e-9)
+        _assert_close("serie: dia 02 herda valor (fill)",    serie[date(2026, 7, 2)], 850.0, 1e-9)
+        _assert_close("serie: dia 03 herda valor (fill)",    serie[date(2026, 7, 3)], 850.0, 1e-9)
+        _assert_close("serie: dia 04 atualiza",              serie[date(2026, 7, 4)], 1000.0, 1e-9)
+        _assert_close("serie: dia 06 (ate) herda",           serie[date(2026, 7, 6)], 1000.0, 1e-9)
+        _assert("serie: cobre do 1º snapshot até 'ate'", len(serie) == 6)
+        _assert("serie: histórico vazio retorna {}", bh.serie_diaria([]) == {})
+
         # Apagar último registro
         bh.delete_snapshot(hist[-1]["id"])
         _assert("delete_snapshot remove o registro", len(bh.load_history()) == 1)

@@ -8,7 +8,7 @@ foi depósito/saque do que foi resultado de apostas.
 import json
 import os
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 _DIR     = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(_DIR, "bets.db")
@@ -98,6 +98,32 @@ def _parse_dt(s: str):
         except (ValueError, TypeError):
             pass
     return None
+
+
+def serie_diaria(history: list[dict], ate: date | None = None) -> dict:
+    """
+    Valor da banca por dia: o último snapshot de cada dia vale para o dia;
+    dias sem registro herdam o valor anterior (forward-fill), do 1º snapshot
+    até 'ate' (default: hoje). Retorna {date: total}.
+    """
+    por_dia: dict[date, float] = {}
+    for h in history:  # ordenado por id — o último do dia sobrescreve
+        dt = _parse_dt(h["data"])
+        if dt is not None:
+            por_dia[dt.date()] = h["total"]
+    if not por_dia:
+        return {}
+
+    inicio = min(por_dia)
+    fim    = ate or date.today()
+    serie: dict[date, float] = {}
+    atual  = por_dia[inicio]
+    d = inicio
+    while d <= fim:
+        atual = por_dia.get(d, atual)
+        serie[d] = atual
+        d += timedelta(days=1)
+    return serie
 
 
 def analise_evolucao(history: list[dict], bets: list[dict]) -> dict | None:

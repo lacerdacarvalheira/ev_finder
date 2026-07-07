@@ -1,9 +1,14 @@
 """EV Finder — Tab: Analytics de Performance"""
+import calendar as _cal
+from datetime import date, timedelta
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from bankroll_history import analise_evolucao, delete_snapshot, load_history, _parse_dt
+from bankroll_history import (
+    analise_evolucao, delete_snapshot, load_history, serie_diaria, _parse_dt,
+)
 from bet_tracker import calc_stats, load_bets
 
 # Paleta categórica validada (CVD-safe, ordem fixa — cor segue a entidade)
@@ -35,6 +40,7 @@ def _render_evolucao_banca(bets: list[dict]) -> None:
             f"1 registro salvo ({history[0]['data']} — R$ {history[0]['total']:,.2f}). "
             "Salve de novo quando a banca mudar para ver a evolução."
         )
+        _render_calendario_banca(history)
         return
 
     e1, e2, e3, e4, e5 = st.columns(5)
@@ -100,6 +106,8 @@ def _render_evolucao_banca(bets: list[dict]) -> None:
     )
     st.plotly_chart(fig, width='stretch')
 
+    _render_calendario_banca(history)
+
     # ── Tabela do histórico ───────────────────────────────────────────────────
     with st.expander(f"📜 Registros do histórico ({len(history)})"):
         rows = []
@@ -124,6 +132,107 @@ def _render_evolucao_banca(bets: list[dict]) -> None:
                      help="Use se salvou por engano. Apaga só o registro mais recente."):
             delete_snapshot(history[-1]["id"])
             st.rerun()
+
+
+_MESES_PT = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+             "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+_DIAS_SEMANA = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+
+
+def _render_calendario_banca(history: list[dict]) -> None:
+    """Calendário mensal: valor total da banca em cada dia (forward-fill),
+    célula colorida pela variação do dia (verde subiu / vermelho caiu)."""
+    st.markdown("#### 📅 Calendário da banca")
+
+    serie = serie_diaria(history)
+    if not serie:
+        return
+
+    meses  = sorted({(d.year, d.month) for d in serie})
+    labels = [f"{_MESES_PT[m - 1]} {y}" for y, m in meses]
+
+    sc1, sc2, sc3 = st.columns([4, 4, 4])
+    sel = sc1.selectbox("Mês", labels, index=len(labels) - 1, key="bh_cal_mes")
+    ano, mes = meses[labels.index(sel)]
+
+    n_dias      = _cal.monthrange(ano, mes)[1]
+    primeiro_wd = date(ano, mes, 1).weekday()  # 0 = segunda
+    n_semanas   = (primeiro_wd + n_dias + 6) // 7
+
+    # Métricas do mês
+    dias_mes  = [d for d in serie if d.year == ano and d.month == mes]
+    fim_mes   = serie[max(dias_mes)]
+    vespera   = date(ano, mes, 1) - timedelta(days=1)
+    base_mes  = serie.get(vespera, serie[min(dias_mes)])
+    var_mes   = round(fim_mes - base_mes, 2)
+    sc2.metric("Banca no fim do mês", f"R$ {fim_mes:,.2f}")
+    sc3.metric("Variação no mês", f"R$ {var_mes:+,.2f}",
+               delta=f"{var_mes / base_mes * 100:+.1f}%" if base_mes > 0 else None)
+
+    # Grade do calendário
+    z       = [[None] * 7 for _ in range(n_semanas)]
+    customs = [[["", 0.0, 0.0]] * 7 for _ in range(n_semanas)]
+    customs = [[list(c) for c in row] for row in customs]
+    annotations = []
+
+    for dia in range(1, n_dias + 1):
+        d   = date(ano, mes, dia)
+        idx = primeiro_wd + dia - 1
+        row, col = idx // 7, idx % 7
+
+        # número do dia (canto superior esquerdo, sempre visível)
+        annotations.append(dict(
+            x=_DIAS_SEMANA[col], y=row, xref="x", yref="y",
+            text=str(dia), showarrow=False,
+            xshift=-30, yshift=24,
+            font=dict(size=10, color="#898781"),
+        ))
+
+        total = serie.get(d)
+        if total is None:
+            continue
+        ant   = serie.get(d - timedelta(days=1))
+        delta = round(total - ant, 2) if ant is not None else 0.0
+        z[row][col]       = delta
+        customs[row][col] = [d.strftime("%d/%m/%Y"), total, delta]
+        annotations.append(dict(
+            x=_DIAS_SEMANA[col], y=row, xref="x", yref="y",
+            text=f"<b>R$ {total:,.0f}</b>"
+                 + (f"<br><span style='font-size:9px'>{delta:+,.0f}</span>"
+                    if abs(delta) >= 0.01 else ""),
+            showarrow=False,
+            font=dict(size=11, color="#212529"),
+        ))
+
+    max_abs = max((abs(v) for r in z for v in r if v is not None), default=0) or 1.0
+
+    fig = go.Figure(go.Heatmap(
+        z=z, x=_DIAS_SEMANA, y=list(range(n_semanas)),
+        customdata=customs,
+        hovertemplate="%{customdata[0]}<br>Total: R$ %{customdata[1]:,.2f}"
+                      "<br>Δ dia: R$ %{customdata[2]:+,.2f}<extra></extra>",
+        colorscale=[[0.0, "#e8909a"], [0.5, "#f0efec"], [1.0, "#8fce9f"]],
+        zmin=-max_abs, zmax=max_abs,
+        xgap=3, ygap=3,
+        showscale=False, hoverongaps=False,
+    ))
+    fig.update_xaxes(side="top", showgrid=False, zeroline=False, fixedrange=True,
+                     tickfont=dict(size=11, color="#898781"))
+    fig.update_yaxes(autorange="reversed", visible=False, fixedrange=True)
+    fig.update_layout(
+        height=60 + 76 * n_semanas,
+        margin=dict(l=0, r=0, t=30, b=0),
+        annotations=annotations,
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+    st.plotly_chart(fig, width='stretch', config={"displayModeBar": False})
+
+    st.caption(
+        "Cada célula mostra o total da banca no dia (verde = dia positivo, "
+        "vermelho = negativo, cinza = sem mudança). Dias sem registro herdam "
+        "o último valor salvo — salve as bancas com frequência para o "
+        "calendário ficar fiel."
+    )
 
 
 def render(cfg: dict) -> None:
