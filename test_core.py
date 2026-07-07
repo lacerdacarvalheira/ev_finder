@@ -561,6 +561,66 @@ def test_pior_sequencia():
             pior_sequencia_esperada(0.9, 100) < pior_sequencia_esperada(0.5, 100))
 
 
+def test_bankroll_history():
+    import tempfile
+    import bankroll_history as bh
+
+    _orig = bh.DB_PATH
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.close()
+    bh.DB_PATH = tmp.name
+    try:
+        # 1º snapshot
+        snap1 = bh.add_snapshot({"Superbet": 500.0, "Bet365": 300.0}, 800.0)
+        _assert("1º snapshot marca primeiro=True", snap1 is not None and snap1["primeiro"])
+
+        # Salvar idêntico não duplica
+        dup = bh.add_snapshot({"Superbet": 500.0, "Bet365": 300.0}, 800.0)
+        _assert("snapshot idêntico retorna None", dup is None)
+        _assert("histórico tem só 1 registro", len(bh.load_history()) == 1)
+
+        # Depósito de 200 na Superbet → delta detectado
+        snap2 = bh.add_snapshot({"Superbet": 700.0, "Bet365": 300.0}, 1000.0)
+        _assert_close("delta_total = +200", snap2["delta_total"], 200.0, 1e-9)
+        _assert_close("delta Superbet = +200", snap2["deltas"]["Superbet"], 200.0, 1e-9)
+        _assert("Bet365 sem mudança não aparece nos deltas", "Bet365" not in snap2["deltas"])
+
+        hist = bh.load_history()
+        _assert("histórico tem 2 registros", len(hist) == 2)
+        _assert("bankrolls desserializado como dict", hist[0]["bankrolls"]["Superbet"] == 500.0)
+
+        # Análise: banca 800 → 1000 (+200); lucro de apostas no período = +50
+        # → depósito implícito = 150
+        bets = [
+            {"resultado": "ganhou",   "lucro":  80.0, "data": "01/01/2099 10:00"},
+            {"resultado": "perdeu",   "lucro": -30.0, "data": "01/01/2099 11:00"},
+            {"resultado": "pendente", "lucro":  None, "data": "01/01/2099 12:00"},
+            # Antes do 1º snapshot → fora do período
+            {"resultado": "ganhou",   "lucro": 999.0, "data": "01/01/2000 10:00"},
+        ]
+        an = bh.analise_evolucao(hist, bets)
+        _assert_close("variação = +200", an["variacao"], 200.0, 1e-9)
+        _assert_close("lucro apostas período = +50", an["lucro_apostas"], 50.0, 1e-9)
+        _assert_close("depósito implícito = +150", an["depositos_liquidos"], 150.0, 1e-9)
+        _assert("aposta antiga fora do período ignorada", an["n_resolvidas"] == 2)
+        _assert_close("ROI sobre banca = 50/800", an["roi_banca"], 6.25, 1e-9)
+        _assert_close("crescimento = 200/800", an["crescimento_pct"], 25.0, 1e-9)
+
+        # < 2 snapshots → None
+        _assert("análise com 1 snapshot retorna None",
+                bh.analise_evolucao(hist[:1], bets) is None)
+
+        # Apagar último registro
+        bh.delete_snapshot(hist[-1]["id"])
+        _assert("delete_snapshot remove o registro", len(bh.load_history()) == 1)
+    finally:
+        bh.DB_PATH = _orig
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+
 # ─── Runner ────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -582,6 +642,7 @@ if __name__ == "__main__":
         test_derive_two_way,
         test_favoritos_filter,
         test_pior_sequencia,
+        test_bankroll_history,
     ]
 
     for fn in tests:

@@ -103,7 +103,20 @@ with st.sidebar:
         )
     if st.button("💾 Salvar bancas", width='stretch'):
         save_config({**config, "bankrolls": bankrolls, "bankroll": bankroll})
-        st.toast(f"Bancas salvas! Total: R$ {bankroll:,.2f}", icon="✅")
+        from bankroll_history import add_snapshot
+        _snap = add_snapshot(bankrolls, bankroll)
+        if _snap is None:
+            st.toast(f"Bancas salvas! Total: R$ {bankroll:,.2f} (sem mudança)", icon="✅")
+        elif _snap["primeiro"]:
+            st.toast(f"Bancas salvas! Histórico iniciado com R$ {bankroll:,.2f}", icon="🏦")
+        else:
+            _dt = _snap["delta_total"]
+            _det = " · ".join(f"{c} {d:+,.2f}" for c, d in _snap["deltas"].items())
+            st.toast(
+                f"Banca {_dt:+,.2f} desde {_snap['data_anterior']} ({_det}). "
+                "Veja 📉 Analytics → Evolução da Banca.",
+                icon="📈" if _dt >= 0 else "📉",
+            )
 
     kelly_map = {
         "1/4 Kelly (conservador)": 0.25,

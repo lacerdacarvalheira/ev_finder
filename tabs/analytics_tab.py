@@ -3,7 +3,127 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from bankroll_history import analise_evolucao, delete_snapshot, load_history, _parse_dt
 from bet_tracker import calc_stats, load_bets
+
+# Paleta categórica validada (CVD-safe, ordem fixa — cor segue a entidade)
+_COR_TOTAL = "#2a78d6"
+_COR_CASA  = {
+    "Superbet": "#1baf7a",
+    "Bet365":   "#eda100",
+    "Betano":   "#008300",
+}
+_COR_FALLBACK = "#898781"
+
+
+def _render_evolucao_banca(bets: list[dict]) -> None:
+    st.subheader("🏦 Evolução da Banca")
+
+    history = load_history()
+    if not history:
+        st.info(
+            "Sem histórico ainda. Cada **💾 Salvar bancas** na barra lateral "
+            "registra um snapshot — a partir do 2º registro você vê aqui a "
+            "evolução, quanto veio de lucro e quanto foi depósito."
+        )
+        return
+
+    analise = analise_evolucao(history, bets)
+
+    if analise is None:
+        st.caption(
+            f"1 registro salvo ({history[0]['data']} — R$ {history[0]['total']:,.2f}). "
+            "Salve de novo quando a banca mudar para ver a evolução."
+        )
+        return
+
+    e1, e2, e3, e4, e5 = st.columns(5)
+    e1.metric("Banca atual", f"R$ {analise['banca_atual']:,.2f}",
+              delta=f"{analise['crescimento_pct']:+.1f}%"
+                    if analise["crescimento_pct"] is not None else None)
+    e2.metric("Variação total", f"R$ {analise['variacao']:+,.2f}",
+              help=f"Desde o 1º registro em {analise['desde']} "
+                   f"(R$ {analise['banca_inicial']:,.2f}).")
+    e3.metric("Lucro em apostas", f"R$ {analise['lucro_apostas']:+,.2f}",
+              help=f"{analise['n_resolvidas']} aposta(s) resolvida(s) no Tracker "
+                   "dentro do período do histórico.")
+    e4.metric("Depósitos/saques", f"R$ {analise['depositos_liquidos']:+,.2f}",
+              help="Variação da banca menos o lucro das apostas = dinheiro que "
+                   "entrou ou saiu por fora (depósitos, saques, bônus).")
+    e5.metric("ROI sobre a banca", f"{analise['roi_banca']:+.2f}%"
+              if analise["roi_banca"] is not None else "—",
+              help="Lucro das apostas ÷ banca inicial do período. Diferente do "
+                   "ROI sobre valor apostado mostrado abaixo.")
+
+    _dep = analise["depositos_liquidos"]
+    if abs(_dep) >= 0.01:
+        _verbo = "depositou" if _dep > 0 else "sacou"
+        st.caption(
+            f"Do total de **R$ {analise['variacao']:+,.2f}** de variação, "
+            f"**R$ {analise['lucro_apostas']:+,.2f}** veio das apostas registradas "
+            f"e você {_verbo} **R$ {abs(_dep):,.2f}** por fora. O ROI acima "
+            "considera só o lucro das apostas — depósito não é lucro."
+        )
+
+    # ── Gráfico de evolução ───────────────────────────────────────────────────
+    datas  = [_parse_dt(h["data"]) or h["data"] for h in history]
+    totais = [h["total"] for h in history]
+    casas  = sorted({c for h in history for c in h["bankrolls"]})
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=datas, y=totais,
+        mode="lines+markers", line=dict(width=2.5, color=_COR_TOTAL, shape="hv"),
+        marker=dict(size=8), name="Total",
+        hovertemplate="%{x|%d/%m %H:%M}<br>Total: R$ %{y:,.2f}<extra></extra>",
+    ))
+    for casa in casas:
+        vals = [h["bankrolls"].get(casa) for h in history]
+        if not any(v for v in vals if v):
+            continue
+        fig.add_trace(go.Scatter(
+            x=datas, y=vals,
+            mode="lines+markers",
+            line=dict(width=1.5, color=_COR_CASA.get(casa, _COR_FALLBACK), shape="hv"),
+            marker=dict(size=6), name=casa,
+            hovertemplate=f"{casa}: R$ %{{y:,.2f}}<extra></extra>",
+        ))
+    fig.update_layout(
+        height=340,
+        margin=dict(l=0, r=0, t=10, b=0),
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.01),
+        yaxis_title="Saldo (R$)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(gridcolor="#e1e0d9"),
+        yaxis=dict(gridcolor="#e1e0d9"),
+    )
+    st.plotly_chart(fig, width='stretch')
+
+    # ── Tabela do histórico ───────────────────────────────────────────────────
+    with st.expander(f"📜 Registros do histórico ({len(history)})"):
+        rows = []
+        prev_total = None
+        for h in history:
+            row = {"Data": h["data"]}
+            for casa in casas:
+                row[casa] = h["bankrolls"].get(casa, 0.0)
+            row["Total"]   = h["total"]
+            row["Δ Total"] = round(h["total"] - prev_total, 2) if prev_total is not None else None
+            prev_total = h["total"]
+            rows.append(row)
+        st.dataframe(
+            pd.DataFrame(rows), hide_index=True, width='stretch',
+            column_config={
+                **{c: st.column_config.NumberColumn(format="R$ %.2f") for c in casas},
+                "Total":   st.column_config.NumberColumn(format="R$ %.2f"),
+                "Δ Total": st.column_config.NumberColumn(format="R$ %+.2f"),
+            },
+        )
+        if st.button("🗑️ Apagar último registro", key="bh_del_last",
+                     help="Use se salvou por engano. Apaga só o registro mais recente."):
+            delete_snapshot(history[-1]["id"])
+            st.rerun()
 
 
 def render(cfg: dict) -> None:
@@ -11,6 +131,9 @@ def render(cfg: dict) -> None:
 
     bets     = load_bets()
     resolved = [b for b in bets if b["resultado"] in ("ganhou", "perdeu")]
+
+    _render_evolucao_banca(bets)
+    st.divider()
 
     if len(resolved) < 3:
         st.info(
