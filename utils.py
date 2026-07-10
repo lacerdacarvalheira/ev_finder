@@ -27,6 +27,26 @@ def lucro_em_unidades(lucro: float, unit_val: float) -> float | None:
         return None
     return round(lucro / unit_val, 2)
 
+
+# ── Movimentos de saldo por aposta ────────────────────────────────────────────
+# Modelo: ao registrar, o stake sai do saldo (congelado). O saldo só recebe de
+# volta o retorno do resultado: ganhou → stake × odd; perdeu/pendente → 0.
+
+def payout_aposta(resultado: str, stake: float, odd: float) -> float:
+    """Quanto a casa devolve para o saldo dado o resultado."""
+    return round(stake * odd, 2) if resultado == "ganhou" else 0.0
+
+
+def movimento_resultado(antigo: str, novo: str, stake: float, odd: float) -> float:
+    """Ajuste de saldo ao mudar o resultado de uma aposta já debitada."""
+    return round(payout_aposta(novo, stake, odd) - payout_aposta(antigo, stake, odd), 2)
+
+
+def movimento_delete(resultado: str, stake: float, odd: float) -> float:
+    """Ajuste de saldo ao apagar uma aposta debitada: desfaz como se nunca
+    tivesse existido (devolve o stake e retira o payout já creditado)."""
+    return round(stake - payout_aposta(resultado, stake, odd), 2)
+
 BOOKIE_NAMES: dict[str, str] = {
     # ── Referência ───────────────────────────────────────────────────────────
     "pinnacle":         "Pinnacle",

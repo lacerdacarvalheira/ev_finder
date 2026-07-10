@@ -4,9 +4,13 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from bet_tracker import (
-    add_bet, calc_stats, calc_stats_by, delete_bet, load_bets, update_result,
+    add_bet, calc_stats, calc_stats_by, congelado, delete_bet, load_bets,
+    update_result,
 )
-from utils import lucro_em_unidades, unit_value
+from config_store import mover_saldo_ui
+from utils import (
+    lucro_em_unidades, movimento_delete, movimento_resultado, unit_value,
+)
 
 
 def render(cfg: dict) -> None:
@@ -39,37 +43,70 @@ def render(cfg: dict) -> None:
             f"({cfg.get('unit_pct', 1.0):g}% da banca total)"
         )
 
+    _cong = congelado(bets)
+    _cong_total = round(sum(_cong.values()), 2)
+    if _cong_total > 0:
+        _cong_det = " · ".join(f"{c}: R$ {v:,.2f}" for c, v in _cong.items())
+        st.markdown(
+            f"🧊 Congelado em {stats['pendentes']} pendente(s): "
+            f"**R$ {_cong_total:,.2f}** ({_cong_det})"
+        )
+
     st.divider()
 
     pending = st.session_state.get("pending_bet", {})
+    _casas_cfg = list((cfg.get("bankrolls") or {}).keys())
     with st.expander("➕ Registrar nova aposta", expanded=bool(pending)):
         with st.form("form_bet", clear_on_submit=True):
-            fc1, fc2 = st.columns(2)
-            jogo    = fc1.text_input("Jogo",    value=pending.get("jogo", ""))
-            casa    = fc2.text_input("Casa",    value=pending.get("casa", ""))
-            fc3, fc4 = st.columns(2)
-            mercado = fc3.text_input("Mercado", value=pending.get("mercado", ""))
-            selecao = fc4.text_input("Seleção", value=pending.get("selecao", ""))
-            fc5, fc6, fc7, fc8 = st.columns(4)
-            odd    = fc5.number_input("Odd",           min_value=1.01, value=float(pending.get("odd",      2.0)),  step=0.01, format="%.3f")
-            stake  = fc6.number_input("Stake (R$)",    min_value=0.01, value=float(pending.get("stake",   10.0)),  step=1.0,  format="%.2f")
-            ev_pct = fc7.number_input("EV (%)",        min_value=0.0,  value=float(pending.get("ev_pct",   0.0)),  step=0.1,  format="%.2f")
-            prob_r = fc8.number_input("Prob. Real (%)", min_value=0.0, value=float(pending.get("prob_real", 50.0)), step=0.5,  format="%.1f")
-
-            tipo_rec = st.selectbox(
-                "Tipo de recomendação",
-                ["—", "EV+", "🛡️ Segura", "💡 Valor", "⚡ Sharp", "🔗 Combo", "Manual"],
-                index=0,
-                help="Classifica a origem desta aposta para análise de desempenho por tipo.",
+            fc1, fc2, fc3 = st.columns(3)
+            stake = fc1.number_input("Valor apostado (R$)", min_value=0.01,
+                                     value=float(pending.get("stake", 10.0)),
+                                     step=1.0, format="%.2f")
+            _casa_pend = pending.get("casa", "")
+            _opcoes    = _casas_cfg + ["Outra…"]
+            _idx       = _opcoes.index(_casa_pend) if _casa_pend in _opcoes else 0
+            casa_sel = fc2.selectbox(
+                "Casa de aposta", _opcoes, index=_idx,
+                help="Nas casas das suas bancas, o valor é descontado do saldo "
+                     "e fica congelado até você marcar o resultado.",
             )
+            odd = fc3.number_input("Odd", min_value=1.01,
+                                   value=float(pending.get("odd", 2.0)),
+                                   step=0.01, format="%.3f")
+            jogo = st.text_input(
+                "Descrição (opcional)", value=pending.get("jogo", ""),
+                placeholder="Ex.: França vence a Espanha",
+                help="Para você achar a aposta depois. Vazio = data e hora.",
+            )
+            casa_outra = st.text_input("Nome da casa (só se escolheu 'Outra…')",
+                                       value="" if _casa_pend in _opcoes else _casa_pend)
 
-            submitted = st.form_submit_button("💾 Salvar aposta", type="primary")
-            if submitted and jogo and selecao:
-                _tipo = None if tipo_rec == "—" else tipo_rec
-                add_bet(jogo, mercado, selecao, odd, stake, ev_pct, prob_r, casa, tipo_rec=_tipo)
-                st.session_state.pop("pending_bet", None)
-                st.toast("Aposta registrada!", icon="✅")
-                st.rerun()
+            submitted = st.form_submit_button("💾 Registrar aposta", type="primary")
+            if submitted:
+                casa = casa_outra.strip() if casa_sel == "Outra…" else casa_sel
+                if not casa:
+                    st.warning("Escolha a casa de aposta (ou preencha o nome em 'Outra…').")
+                else:
+                    from datetime import datetime as _dt
+                    _desc = jogo.strip() or f"Aposta {_dt.now():%d/%m %H:%M}"
+                    novo_saldo = mover_saldo_ui(casa, -stake)
+                    add_bet(
+                        _desc, pending.get("mercado", ""),
+                        pending.get("selecao") or "—", odd, stake,
+                        float(pending.get("ev_pct", 0.0)),
+                        float(pending.get("prob_real", 50.0)),
+                        casa, tipo_rec=pending.get("tipo_rec") or ("EV+" if pending else "Manual"),
+                        debitado=novo_saldo is not None,
+                    )
+                    st.session_state.pop("pending_bet", None)
+                    if novo_saldo is not None:
+                        st.toast(
+                            f"Aposta registrada! 🧊 R$ {stake:,.2f} congelado — "
+                            f"saldo {casa}: R$ {novo_saldo:,.2f}", icon="✅",
+                        )
+                    else:
+                        st.toast("Aposta registrada!", icon="✅")
+                    st.rerun()
 
     st.divider()
 
@@ -108,9 +145,16 @@ def render(cfg: dict) -> None:
                 )
                 if br1.button("✅ Ganhou", key=f"win_{real_idx}"):
                     update_result(real_idx, "ganhou", odd_close if odd_close > 1.0 else None)
+                    if bet.get("debitado"):
+                        _mov  = movimento_resultado("pendente", "ganhou", bet["stake"], bet["odd"])
+                        _novo = mover_saldo_ui(bet["casa"], _mov)
+                        if _novo is not None:
+                            st.toast(f"+R$ {_mov:,.2f} de volta no saldo da "
+                                     f"{bet['casa']} (R$ {_novo:,.2f})", icon="💰")
                     st.rerun()
                 if br2.button("❌ Perdeu", key=f"lose_{real_idx}"):
                     update_result(real_idx, "perdeu", odd_close if odd_close > 1.0 else None)
+                    # stake já saiu do saldo no registro — perdeu não devolve nada
                     st.rerun()
             else:
                 if bet.get("odd_fechamento"):
@@ -124,6 +168,9 @@ def render(cfg: dict) -> None:
                     )
 
             if st.button("🗑️ Deletar", key=f"del_{real_idx}"):
+                if bet.get("debitado"):
+                    _mov = movimento_delete(res, bet["stake"], bet["odd"])
+                    mover_saldo_ui(bet["casa"], _mov)
                 delete_bet(real_idx)
                 st.rerun()
 

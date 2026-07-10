@@ -16,7 +16,7 @@ except ImportError:
     def st_autorefresh(*a, **kw): return 0  # noqa: E731
 
 from tabs import arb_tab, analytics_tab, compare_tab, ev_tab, favoritos_tab, multiplas_tab, sim_tab, today_tab, tracker_tab, watchlist_tab
-from bet_tracker import calc_stats, load_bets
+from bet_tracker import calc_stats, congelado, load_bets
 from ev_calculator import find_opportunities
 from line_cache import get_cache_age, save_snapshot
 from odds_api import BOOKMAKER_DISPLAY, MARKET_OPTIONS, SOCCER_LEAGUES, OddsAPIClient, OddsAPIError
@@ -29,23 +29,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
-
-
-def load_config() -> dict:
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
-
-
-def save_config(data: dict):
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
+from config_store import CONFIG_PATH, load_config, save_config
 
 config = load_config()
 
@@ -79,6 +63,9 @@ with st.sidebar:
     st.caption("Saldo em cada casa onde você aposta. O Kelly é calculado sobre o saldo da casa escolhida na hora de registrar.")
     CASAS_USUARIO = ["Superbet", "Bet365", "Betano", "KTO", "EstrelaBet"]
     _bk_saved = config.get("bankrolls", {})
+    # Movimentos automáticos (registro/resultado de aposta) atualizam o widget
+    for _casa_u, _v_u in st.session_state.pop("_saldo_updates", {}).items():
+        st.session_state[f"saldo_{_casa_u}"] = _v_u
     bankrolls: dict[str, float] = {}
     for _casa in CASAS_USUARIO:
         bankrolls[_casa] = st.number_input(
@@ -93,6 +80,12 @@ with st.sidebar:
     if _total_bancas > 0:
         bankroll = _total_bancas
         st.caption(f"**Banca total:** R$ {bankroll:,.2f}")
+        _cong_total = round(sum(congelado().values()), 2)
+        if _cong_total > 0:
+            st.caption(
+                f"🧊 **Congelado em pendentes:** R$ {_cong_total:,.2f} "
+                "(já descontado dos saldos ao registrar)"
+            )
     else:
         bankroll = st.number_input(
             "Bankroll total (R$)",
@@ -333,10 +326,14 @@ d1, d2, d3, d4, d5 = st.columns(5)
 _bk_detail = " · ".join(f"{c}: R$ {v:,.0f}" for c, v in bankrolls.items() if v > 0)
 d1.metric("Bankroll (R$)", f"{bankroll:,.0f}",
           help=_bk_detail or "Configure os saldos por casa na barra lateral.")
+_cong_dash = round(sum(congelado(_bets_all).values()), 2)
 d2.metric(
     "Apostas pendentes",
     _stats_all["pendentes"],
-    help="Apostas registradas aguardando resultado.",
+    delta=f"🧊 R$ {_cong_dash:,.2f} congelado" if _cong_dash > 0 else None,
+    delta_color="off",
+    help="Apostas registradas aguardando resultado. O valor congelado já foi "
+         "descontado do saldo da casa e volta (× odd) se a aposta ganhar.",
 )
 if _stats_all["resolvidas"] > 0:
     _roi_delta = f"{_stats_all['roi']:+.1f}%"

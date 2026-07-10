@@ -137,13 +137,22 @@ def render(cfg: dict) -> None:
             f"prob {f['Prob. justa (%)']:.1f}% · EV {f['EV (%)']:+.2f}%"
         )
         if rc2.button("➕ Registrar", key=f"fav_reg_{i}"):
+            from config_store import mover_saldo_ui
+            _casa_f = casa_reg or f["Casa"]
+            _novo   = mover_saldo_ui(_casa_f, -stake_valor)
             add_bet(
                 jogo=f["Jogo"], mercado=f["Mercado"], selecao=f["Seleção"],
                 odd=f["Melhor odd"], stake=stake_valor,
                 ev_pct=f["EV (%)"], prob_real=f["Prob. justa (%)"],
-                casa=casa_reg or f["Casa"], tipo_rec="favoritos",
+                casa=_casa_f, tipo_rec="favoritos",
+                debitado=_novo is not None,
             )
-            st.toast(f"Aposta registrada (modo favoritos): {f['Seleção']}", icon="⭐")
+            if _novo is not None:
+                st.toast(f"⭐ {f['Seleção']} registrada — 🧊 R$ {stake_valor:,.2f} "
+                         f"congelado, saldo {_casa_f}: R$ {_novo:,.2f}", icon="⭐")
+            else:
+                st.toast(f"Aposta registrada (modo favoritos): {f['Seleção']}", icon="⭐")
+            st.rerun()
 
     # ── Dupla do dia ──────────────────────────────────────────────────────────
     _melhores_por_jogo: dict = {}

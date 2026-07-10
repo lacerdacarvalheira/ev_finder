@@ -42,11 +42,17 @@ def init_db():
             lucro          REAL,
             odd_fechamento REAL,
             clv            REAL,
-            tipo_rec       TEXT
+            tipo_rec       TEXT,
+            debitado       INTEGER DEFAULT 0
         )""")
         # Migração: adiciona tipo_rec se a tabela já existe sem ela
         try:
             conn.execute("ALTER TABLE bets ADD COLUMN tipo_rec TEXT")
+        except Exception:
+            pass
+        # Migração: debitado = stake já foi subtraído do saldo da casa
+        try:
+            conn.execute("ALTER TABLE bets ADD COLUMN debitado INTEGER DEFAULT 0")
         except Exception:
             pass
 
@@ -88,15 +94,17 @@ def load_bets() -> list[dict]:
 
 def add_bet(jogo: str, mercado: str, selecao: str, odd: float,
             stake: float, ev_pct: float, prob_real: float, casa: str,
-            tipo_rec: str | None = None) -> None:
+            tipo_rec: str | None = None, debitado: bool = False) -> None:
     with _conn() as conn:
         conn.execute(
             "INSERT INTO bets (data,jogo,mercado,selecao,odd,stake,ev_pct,"
-            "prob_real,casa,resultado,tipo_rec) VALUES (?,?,?,?,?,?,?,?,?,'pendente',?)",
+            "prob_real,casa,resultado,tipo_rec,debitado) "
+            "VALUES (?,?,?,?,?,?,?,?,?,'pendente',?,?)",
             (datetime.now().strftime("%d/%m/%Y %H:%M"),
              jogo, mercado, selecao,
              round(float(odd), 3), round(float(stake), 2),
-             round(float(ev_pct), 2), round(float(prob_real), 1), casa, tipo_rec),
+             round(float(ev_pct), 2), round(float(prob_real), 1), casa, tipo_rec,
+             1 if debitado else 0),
         )
 
 
@@ -130,6 +138,17 @@ def delete_bet(index: int) -> None:
         return
     with _conn() as conn:
         conn.execute("DELETE FROM bets WHERE id=?", (bets[index]["id"],))
+
+
+def congelado(bets: list[dict] | None = None) -> dict[str, float]:
+    """Dinheiro 'congelado' em apostas pendentes, por casa: {casa: total}."""
+    if bets is None:
+        bets = load_bets()
+    out: dict[str, float] = defaultdict(float)
+    for b in bets:
+        if b.get("resultado") == "pendente" and b.get("stake"):
+            out[b.get("casa") or "—"] += b["stake"]
+    return {c: round(v, 2) for c, v in out.items()}
 
 
 # ─── Estatísticas ─────────────────────────────────────────────────────────────

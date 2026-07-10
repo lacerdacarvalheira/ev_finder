@@ -651,6 +651,87 @@ def test_unidades():
     _assert("banca zerada retorna None", lucro_em_unidades(50.0, unit_value(0.0, 1.0)) is None)
 
 
+def test_movimentos_saldo():
+    import os
+    import tempfile
+
+    from utils import movimento_delete, movimento_resultado, payout_aposta
+
+    # Payout por resultado
+    _assert_close("payout ganhou = stake*odd", payout_aposta("ganhou", 50.0, 2.0), 100.0)
+    _assert_close("payout perdeu = 0", payout_aposta("perdeu", 50.0, 2.0), 0.0)
+    _assert_close("payout pendente = 0", payout_aposta("pendente", 50.0, 2.0), 0.0)
+
+    # Ajuste ao resolver (stake já saiu no registro)
+    _assert_close("pendente→ganhou credita stake*odd",
+                  movimento_resultado("pendente", "ganhou", 50.0, 2.0), 100.0)
+    _assert_close("pendente→perdeu não devolve nada",
+                  movimento_resultado("pendente", "perdeu", 50.0, 2.0), 0.0)
+    _assert_close("correção ganhou→perdeu retira o crédito",
+                  movimento_resultado("ganhou", "perdeu", 50.0, 2.0), -100.0)
+
+    # Ajuste ao deletar (desfaz como se nunca tivesse existido)
+    _assert_close("delete pendente devolve o stake",
+                  movimento_delete("pendente", 50.0, 2.0), 50.0)
+    _assert_close("delete perdeu devolve o stake",
+                  movimento_delete("perdeu", 50.0, 2.0), 50.0)
+    _assert_close("delete ganhou retira o lucro líquido",
+                  movimento_delete("ganhou", 50.0, 2.0), -50.0)
+
+    # aplicar_movimento_banca com config temporário
+    import config_store as cs
+    old_cfg = cs.CONFIG_PATH
+    tmp_cfg = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+    tmp_cfg.close()
+    try:
+        cs.CONFIG_PATH = tmp_cfg.name
+        cs.save_config({"bankrolls": {"Superbet": 100.0, "Bet365": 50.0},
+                        "bankroll": 150.0})
+        novo = cs.aplicar_movimento_banca("Superbet", -30.0)
+        _assert_close("registro desconta do saldo da casa", novo, 70.0)
+        cfg = cs.load_config()
+        _assert_close("banca total recalculada", cfg["bankroll"], 120.0)
+        _assert("casa fora das bancas retorna None",
+                cs.aplicar_movimento_banca("KTO", -10.0) is None)
+        _assert_close("saldo nunca fica negativo",
+                      cs.aplicar_movimento_banca("Bet365", -999.0), 0.0)
+        _assert_close("ganho credita de volta",
+                      cs.aplicar_movimento_banca("Superbet", 60.0), 130.0)
+    finally:
+        cs.CONFIG_PATH = old_cfg
+        try:
+            os.unlink(tmp_cfg.name)
+        except OSError:
+            pass
+
+    # congelado() com banco temporário
+    import bet_tracker as bt
+    old_db = bt.DB_PATH
+    tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp_db.close()
+    try:
+        bt.DB_PATH = tmp_db.name
+        bt.init_db()
+        bt.add_bet("Jogo A", "h2h", "Time A", 2.0, 30.0, 5.0, 55.0,
+                   "Superbet", debitado=True)
+        bt.add_bet("Jogo B", "h2h", "Time B", 1.5, 20.0, 3.0, 70.0,
+                   "Bet365", debitado=True)
+        cong = bt.congelado()
+        _assert_close("congelado Superbet = 30", cong.get("Superbet", 0), 30.0)
+        _assert_close("congelado Bet365 = 20", cong.get("Bet365", 0), 20.0)
+        _assert("flag debitado persistida", bt.load_bets()[0]["debitado"] == 1)
+        bt.update_result(0, "ganhou")
+        cong = bt.congelado()
+        _assert("resolvida sai do congelado", "Superbet" not in cong)
+        _assert_close("pendente restante continua", cong.get("Bet365", 0), 20.0)
+    finally:
+        bt.DB_PATH = old_db
+        try:
+            os.unlink(tmp_db.name)
+        except OSError:
+            pass
+
+
 # ─── Runner ────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -674,6 +755,7 @@ if __name__ == "__main__":
         test_pior_sequencia,
         test_bankroll_history,
         test_unidades,
+        test_movimentos_saldo,
     ]
 
     for fn in tests:
