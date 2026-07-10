@@ -637,6 +637,20 @@ def test_bankroll_history():
             pass
 
 
+def test_unidades():
+    from utils import UNIT_MULTIPLES, lucro_em_unidades, unit_value
+
+    _assert("múltiplos padrão", UNIT_MULTIPLES == [0.25, 0.50, 0.75, 1.0, 1.25, 1.5])
+    _assert_close("1u = 1% de R$ 1000 = R$ 10", unit_value(1000.0, 1.0), 10.0)
+    _assert_close("1u = 2% de R$ 500 = R$ 10", unit_value(500.0, 2.0), 10.0)
+    _assert_close("0.25u de banca 1000 = R$ 2.50", 0.25 * unit_value(1000.0, 1.0), 2.5)
+    _assert_close("1.5u de banca 1000 = R$ 15", 1.5 * unit_value(1000.0, 1.0), 15.0)
+    _assert_close("lucro +35 com 1u=10 → +3.5u", lucro_em_unidades(35.0, 10.0), 3.5)
+    _assert_close("lucro -12.5 com 1u=10 → -1.25u", lucro_em_unidades(-12.5, 10.0), -1.25)
+    _assert("unidade zero retorna None", lucro_em_unidades(50.0, 0.0) is None)
+    _assert("banca zerada retorna None", lucro_em_unidades(50.0, unit_value(0.0, 1.0)) is None)
+
+
 # ─── Runner ────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -659,6 +673,7 @@ if __name__ == "__main__":
         test_favoritos_filter,
         test_pior_sequencia,
         test_bankroll_history,
+        test_unidades,
     ]
 
     for fn in tests:

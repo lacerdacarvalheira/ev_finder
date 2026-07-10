@@ -10,6 +10,7 @@ from bankroll_history import (
     analise_evolucao, delete_snapshot, load_history, serie_diaria, _parse_dt,
 )
 from bet_tracker import calc_stats, load_bets
+from utils import lucro_em_unidades, unit_value
 
 # Paleta categórica validada (CVD-safe, ordem fixa — cor segue a entidade)
 _COR_TOTAL = "#2a78d6"
@@ -264,6 +265,15 @@ def render(cfg: dict) -> None:
     c5.metric("CLV médio",
               f"{stats['clv_medio']:+.2f}%" if stats["clv_medio"] is not None else "—",
               help="CLV positivo = você bate a linha de fechamento sistematicamente (edge real).")
+
+    _uval  = unit_value(cfg.get("bankroll") or 0, cfg.get("unit_pct", 1.0))
+    _units = lucro_em_unidades(stats["lucro_total"], _uval)
+    if _units is not None:
+        st.markdown(
+            f"{'🟢' if _units >= 0 else '🔴'} Resultado em unidades: "
+            f"**{_units:+.2f}u** &nbsp;·&nbsp; 1u = R$ {_uval:,.2f} "
+            f"({cfg.get('unit_pct', 1.0):g}% da banca total)"
+        )
 
     st.divider()
 

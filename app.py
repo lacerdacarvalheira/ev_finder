@@ -101,8 +101,24 @@ with st.sidebar:
             step=100.0,
             help="Usado enquanto os saldos por casa estiverem zerados.",
         )
+    # — Unidades —
+    from utils import UNIT_MULTIPLES, unit_value
+    unit_pct = st.number_input(
+        "Unidade (% da banca total)",
+        min_value=0.25, max_value=10.0,
+        value=float(config.get("unit_pct", 1.0)),
+        step=0.25,
+        help="Padrão do mercado: 1 unidade = 1% da banca total. "
+             "Ex.: banca de R$ 1.000 → 1u = R$ 10.",
+    )
+    _unit_val = unit_value(bankroll, unit_pct)
+    with st.expander(f"📏 Unidades — 1u = R$ {_unit_val:,.2f}"):
+        for _m in UNIT_MULTIPLES:
+            st.markdown(f"- **{_m:g}u** → R$ {_m * _unit_val:,.2f}")
+
     if st.button("💾 Salvar bancas", width='stretch'):
-        save_config({**config, "bankrolls": bankrolls, "bankroll": bankroll})
+        save_config({**config, "bankrolls": bankrolls, "bankroll": bankroll,
+                     "unit_pct": unit_pct})
         from bankroll_history import add_snapshot
         _snap = add_snapshot(bankrolls, bankroll)
         if _snap is None:
@@ -428,6 +444,7 @@ _cfg = {
     "api_key":               api_key,
     "bankroll":              bankroll,
     "bankrolls":             bankrolls,
+    "unit_pct":              unit_pct,
     "kelly_frac":            kelly_frac,
     "kelly_label":           kelly_label,
     "kelly_map":             kelly_map,

@@ -6,6 +6,7 @@ import streamlit as st
 from bet_tracker import (
     add_bet, calc_stats, calc_stats_by, delete_bet, load_bets, update_result,
 )
+from utils import lucro_em_unidades, unit_value
 
 
 def render(cfg: dict) -> None:
@@ -28,6 +29,15 @@ def render(cfg: dict) -> None:
         f"{clv_val:+.2f}%" if clv_val is not None else "—",
         help="Closing Line Value médio. Positivo = você bate a linha de fechamento sistematicamente.",
     )
+
+    _uval  = unit_value(cfg.get("bankroll") or 0, cfg.get("unit_pct", 1.0))
+    _units = lucro_em_unidades(lucro, _uval)
+    if _units is not None:
+        st.markdown(
+            f"{'🟢' if _units >= 0 else '🔴'} Resultado em unidades: "
+            f"**{_units:+.2f}u** &nbsp;·&nbsp; 1u = R$ {_uval:,.2f} "
+            f"({cfg.get('unit_pct', 1.0):g}% da banca total)"
+        )
 
     st.divider()
 

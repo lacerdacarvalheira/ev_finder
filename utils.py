@@ -11,6 +11,22 @@ logger.add(_LOG_FILE, rotation="1 week", retention="4 weeks", level="WARNING")
 
 BRT = timezone(timedelta(hours=-3))
 
+# ── Unidades ──────────────────────────────────────────────────────────────────
+# 1 unidade = percentual da banca total; múltiplos padrão para dimensionar stakes.
+UNIT_MULTIPLES = [0.25, 0.50, 0.75, 1.0, 1.25, 1.5]
+
+
+def unit_value(bankroll: float, unit_pct: float = 1.0) -> float:
+    """Valor de 1 unidade em R$ (unit_pct % da banca total)."""
+    return round(bankroll * unit_pct / 100.0, 2)
+
+
+def lucro_em_unidades(lucro: float, unit_val: float) -> float | None:
+    """Converte lucro em R$ para unidades. None se a unidade for inválida."""
+    if not unit_val or unit_val <= 0:
+        return None
+    return round(lucro / unit_val, 2)
+
 BOOKIE_NAMES: dict[str, str] = {
     # ── Referência ───────────────────────────────────────────────────────────
     "pinnacle":         "Pinnacle",
