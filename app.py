@@ -77,7 +77,7 @@ with st.sidebar:
     # — Bancas & Kelly —
     st.subheader("💰 Bancas & Kelly")
     st.caption("Saldo em cada casa onde você aposta. O Kelly é calculado sobre o saldo da casa escolhida na hora de registrar.")
-    CASAS_USUARIO = ["Superbet", "Bet365", "Betano"]
+    CASAS_USUARIO = ["Superbet", "Bet365", "Betano", "KTO", "EstrelaBet"]
     _bk_saved = config.get("bankrolls", {})
     bankrolls: dict[str, float] = {}
     for _casa in CASAS_USUARIO:

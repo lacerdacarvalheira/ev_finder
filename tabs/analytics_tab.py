@@ -14,9 +14,11 @@ from bet_tracker import calc_stats, load_bets
 # Paleta categórica validada (CVD-safe, ordem fixa — cor segue a entidade)
 _COR_TOTAL = "#2a78d6"
 _COR_CASA  = {
-    "Superbet": "#1baf7a",
-    "Bet365":   "#eda100",
-    "Betano":   "#008300",
+    "Superbet":   "#1baf7a",
+    "Bet365":     "#eda100",
+    "Betano":     "#008300",
+    "KTO":        "#4a3aa7",
+    "EstrelaBet": "#e34948",
 }
 _COR_FALLBACK = "#898781"
 
